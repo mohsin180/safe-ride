@@ -1,0 +1,28 @@
+spring:
+  datasource:
+    url: jdbc:postgresql://localhost:5432/user_db
+    username: mohsin
+    password: secret
+    driver-class-name: org.postgresql.Driver
+  jpa:
+    hibernate:
+      ddl-auto: update   # options: validate, update, create, create-drop
+    database-platform: org.hibernate.dialect.PostgreSQLDialect
+server:
+  port: 8001
+keycloak:
+  server-url: http://localhost:9000
+  realm: portfolio-builder
+  client-id: keycloak-user-client
+  client-secret: S6vq4W2GCGbGtdbJouoGarEHHevgqPJp
+eureka:
+  instance:
+    prefer-ip-address: true
+    lease-renewal-interval-in-seconds: 30
+    lease-expiration-duration-in-seconds: 90
+  client:
+    register-with-eureka: true
+    fetch-registry: true
+    registry-fetch-interval-seconds: 30
+    service-url:
+      defaultZone: http://localhost:8761/eureka/
