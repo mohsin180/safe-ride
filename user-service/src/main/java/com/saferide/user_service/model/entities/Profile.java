@@ -1,7 +1,5 @@
 package com.saferide.user_service.model.entities;
 
-import com.saferide.user_service.model.enums.Gender;
-import com.saferide.user_service.model.enums.Role;
 import jakarta.persistence.*;
 import lombok.AllArgsConstructor;
 import lombok.Builder;
@@ -14,30 +12,24 @@ import java.time.LocalDateTime;
 import java.util.UUID;
 
 @Entity
-@Table(name = "users")
 @Data
-@NoArgsConstructor
 @AllArgsConstructor
+@NoArgsConstructor
 @Builder
 @EntityListeners(AuditingEntityListener.class)
-public class Users {
+public class Profile {
     @Id
     @GeneratedValue(strategy = GenerationType.UUID)
     private UUID id;
-    @Column(nullable = false, unique = true)
-    private String username;
-    @Column(nullable = false, unique = true)
-    private String email;
     @Column(nullable = false)
-    @Enumerated(EnumType.STRING)
-    private Role role;
+    private String fullName;
+
+    private String profilePicture;
     @Column(nullable = false)
-    @Enumerated(EnumType.STRING)
-    private Gender gender;
-    @Column(nullable = false, unique = true)
-    private UUID keycloakId;
-    @OneToOne(mappedBy = "user", cascade = CascadeType.ALL, orphanRemoval = true)
-    private Profile profile;
+    private Double rating = 0.0;
+    @JoinColumn(nullable = false, name = "user-id", unique = true)
+    @OneToOne(fetch = FetchType.LAZY)
+    private Users users;
     @CreatedDate
     private LocalDateTime createdAt;
 }

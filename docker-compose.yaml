@@ -1,0 +1,55 @@
+version: "3.9"
+
+services:
+
+  postgres:
+    image: postgres:16
+    container_name: ride-postgres
+    restart: always
+    environment:
+      POSTGRES_DB: postgres
+      POSTGRES_USER: mohsin
+      POSTGRES_PASSWORD: secret
+    ports:
+      - "5432:5432"
+    volumes:
+      - ride_postgres:/var/lib/postgresql/data
+      - ./docker/init.sql:/docker-entrypoint-initdb.d/init.sql:ro
+    networks:
+      - backend
+
+  adminer:
+    image: adminer
+    container_name: ride-adminer
+    restart: always
+    ports:
+      - "8081:8080"
+    depends_on:
+      - postgres
+    networks:
+      - backend
+
+  keycloak:
+    image: quay.io/keycloak/keycloak:26.0
+    container_name: ride-keycloak
+    restart: always
+    command: start-dev
+    environment:
+      KC_DB: postgres
+      KC_DB_URL: jdbc:postgresql://postgres:5432/keycloak_db
+      KC_DB_USERNAME: mohsin
+      KC_DB_PASSWORD: secret
+      KEYCLOAK_ADMIN: admin
+      KEYCLOAK_ADMIN_PASSWORD: admin
+    ports:
+      - "9000:8080"
+    depends_on:
+      - postgres
+    networks:
+      - backend
+
+networks:
+  backend:
+
+volumes:
+  ride_postgres:

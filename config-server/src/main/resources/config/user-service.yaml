@@ -12,9 +12,9 @@ server:
   port: 8001
 keycloak:
   server-url: http://localhost:9000
-  realm: portfolio-builder
-  client-id: keycloak-user-client
-  client-secret: S6vq4W2GCGbGtdbJouoGarEHHevgqPJp
+  realm: safe_ride
+  client-id: ride_sharing_client
+  client-secret: QOzyyNcgHPv9VCcQh7NWKfKk9Qgy7WME
 eureka:
   instance:
     prefer-ip-address: true
