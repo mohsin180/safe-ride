@@ -20,6 +20,7 @@ public class ProfileController {
     }
 
     @PostMapping(value = "/create", consumes = MediaType.MULTIPART_FORM_DATA_VALUE)
+
     public ResponseEntity<ProfileResponse> createProfile(@RequestPart ProfileRequest request,
                                                          @RequestPart(required = false) MultipartFile image,
                                                          @RequestParam("userId") String userId) {
