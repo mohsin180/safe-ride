@@ -5,7 +5,7 @@ import com.saferide.user_service.exceptions.ProfileNotFoundException;
 import com.saferide.user_service.exceptions.UserNotFoundException;
 import com.saferide.user_service.model.dtos.ProfileRequest;
 import com.saferide.user_service.model.dtos.ProfileResponse;
-import com.saferide.user_service.model.entities.Profile;
+import com.saferide.user_service.model.entities.PassengerProfile;
 import com.saferide.user_service.model.entities.Users;
 import com.saferide.user_service.model.mappers.ProfileMapper;
 import com.saferide.user_service.repos.ProfileRepository;
@@ -37,35 +37,35 @@ public class ProfileService {
         Users users = userRepository.findById(UUID.fromString(userId)).orElseThrow(
                 () -> new UserNotFoundException("User not found with id: " + userId)
         );
-        Profile profile = profileMapper.toProfile(request);
+        PassengerProfile passengerProfile = profileMapper.toProfile(request);
         String url = null;
         if (image != null && !image.isEmpty()) {
             url = storageService.storeProfileImage(image, UUID.fromString(userId));
         }
-        profile.setUsers(users);
-        profile.setProfilePicture(url);
-        profileRepository.save(profile);
-        return profileMapper.toResponse(profile);
+        passengerProfile.setUsers(users);
+        passengerProfile.setProfilePicture(url);
+        profileRepository.save(passengerProfile);
+        return profileMapper.toResponse(passengerProfile);
     }
 
 
     public ProfileResponse getProfileById(String userId) {
-        Profile profile = profileRepository.findByUserId(UUID.fromString(userId)).orElseThrow(
+        PassengerProfile passengerProfile = profileRepository.findByUserId(UUID.fromString(userId)).orElseThrow(
                 () -> new ProfileNotFoundException("Profile not found with id: " + userId)
         );
-        return profileMapper.toResponse(profile);
+        return profileMapper.toResponse(passengerProfile);
     }
 
     public ProfileResponse updateProfile(ProfileRequest request, MultipartFile image, String id) {
-        Profile profile = profileRepository.findByUserId(UUID.fromString(id)).orElseThrow(
+        PassengerProfile passengerProfile = profileRepository.findByUserId(UUID.fromString(id)).orElseThrow(
                 () -> new ProfileNotFoundException("Profile not found with id: " + id)
         );
-        profileMapper.updateProfileFromRequest(request, profile);
+        profileMapper.updateProfileFromRequest(request, passengerProfile);
         if (image != null && !image.isEmpty()) {
             String url = storageService.storeProfileImage(image, UUID.fromString(id));
-            profile.setProfilePicture(url);
+            passengerProfile.setProfilePicture(url);
         }
-        profileRepository.save(profile);
-        return profileMapper.toResponse(profile);
+        profileRepository.save(passengerProfile);
+        return profileMapper.toResponse(passengerProfile);
     }
 }
