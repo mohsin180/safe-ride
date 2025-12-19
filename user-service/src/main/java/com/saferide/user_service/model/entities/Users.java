@@ -37,7 +37,7 @@ public class Users {
     @Column(nullable = false, unique = true)
     private UUID keycloakId;
     @OneToOne(mappedBy = "user", cascade = CascadeType.ALL, orphanRemoval = true)
-    private Profile profile;
+    private PassengerProfile passengerProfile;
     @CreatedDate
     private LocalDateTime createdAt;
 }
