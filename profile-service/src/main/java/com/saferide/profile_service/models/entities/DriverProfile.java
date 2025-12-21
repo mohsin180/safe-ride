@@ -4,6 +4,8 @@ import jakarta.persistence.*;
 import lombok.AllArgsConstructor;
 import lombok.Data;
 import lombok.NoArgsConstructor;
+import org.springframework.data.annotation.CreatedDate;
+import org.springframework.data.jpa.domain.support.AuditingEntityListener;
 
 import java.time.LocalDateTime;
 import java.util.UUID;
@@ -13,6 +15,7 @@ import java.util.UUID;
 @AllArgsConstructor
 @NoArgsConstructor
 @Table(name = "driver_profile")
+@EntityListeners(AuditingEntityListener.class)
 public class DriverProfile {
     @Id
     @GeneratedValue(strategy = GenerationType.UUID)
@@ -29,10 +32,11 @@ public class DriverProfile {
 
     @Column(nullable = false)
     private String vehicleNumber;
-
+    @Column(nullable = false)
     private String licenseNumber;
 
     private Double driverRating = 0.0;
-
+    @CreatedDate
+    @Column(nullable = false)
     private LocalDateTime createdAt;
 }

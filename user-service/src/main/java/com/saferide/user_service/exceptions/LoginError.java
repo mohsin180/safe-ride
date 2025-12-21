@@ -12,4 +12,8 @@ public class LoginError extends RuntimeException {
         this.httpStatusCode = httpStatusCode;
     }
 
+    public HttpStatusCode getHttpStatusCode() {
+        return httpStatusCode;
+    }
+
 }

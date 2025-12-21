@@ -26,5 +26,3 @@ eureka:
     registry-fetch-interval-seconds: 30
     service-url:
       defaultZone: http://localhost:8761/eureka/
-  file:
-    upload-dir: uploads/profiles

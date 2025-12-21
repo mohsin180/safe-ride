@@ -1,4 +1,4 @@
-package com.saferide.user_service.exceptions;
+package com.saferide.profile_service.exceptions;
 
 public class ProfileNotFoundException extends RuntimeException {
     public ProfileNotFoundException(String message) {

@@ -1,4 +1,4 @@
-package com.saferide.user_service.exceptions;
+package com.saferide.profile_service.exceptions;
 
 import org.springframework.http.HttpStatus;
 import org.springframework.http.ResponseEntity;
@@ -14,6 +14,19 @@ import java.util.Map;
 
 @RestControllerAdvice
 public class GlobalExceptionHandler {
+
+    @ExceptionHandler(ProfileAlreadyExistsException.class)
+    public ResponseEntity<ErrorResponse> UserNotFoundException(ProfileAlreadyExistsException ex) {
+        ErrorResponse errorResponse = new ErrorResponse(HttpStatus.CONFLICT.value(), ex.getMessage());
+        return new ResponseEntity<>(errorResponse, HttpStatus.CONFLICT);
+    }
+
+    @ExceptionHandler(ProfileNotFoundException.class)
+    public ResponseEntity<ErrorResponse> ProfileNotFoundException(ProfileNotFoundException ex) {
+        ErrorResponse errorResponse = new ErrorResponse(HttpStatus.NOT_FOUND.value(), ex.getMessage());
+        return new ResponseEntity<>(errorResponse, HttpStatus.NOT_FOUND);
+    }
+
     @ExceptionHandler(MethodArgumentNotValidException.class)
     public ResponseEntity<Map<String, String>> MethodArgumentNotValidException(MethodArgumentNotValidException ex) {
         Map<String, String> errorResponse = new HashMap<>();
@@ -25,28 +38,9 @@ public class GlobalExceptionHandler {
         return new ResponseEntity<>(errorResponse, HttpStatus.FORBIDDEN);
     }
 
-    @ExceptionHandler(UserNotFoundException.class)
-    public ResponseEntity<ErrorResponse> UserNotFoundException(UserNotFoundException ex) {
-        ErrorResponse errorResponse = new ErrorResponse(HttpStatus.NOT_FOUND.value(), ex.getMessage());
-        return new ResponseEntity<>(errorResponse, HttpStatus.NOT_FOUND);
-    }
-
-
     @ExceptionHandler(RuntimeException.class)
     public ResponseEntity<ErrorResponse> runTimeException(RuntimeException ex) {
         ErrorResponse errorResponse = new ErrorResponse(HttpStatus.INTERNAL_SERVER_ERROR.value(), ex.getMessage());
         return new ResponseEntity<>(errorResponse, HttpStatus.INTERNAL_SERVER_ERROR);
-    }
-
-    @ExceptionHandler(RegistrationError.class)
-    public ResponseEntity<ErrorResponse> registrationError(RegistrationError ex) {
-        ErrorResponse errorResponse = new ErrorResponse(ex.getStatus(), ex.getMessage());
-        return ResponseEntity.status(ex.getStatus()).body(errorResponse);
-    }
-
-    @ExceptionHandler(LoginError.class)
-    public ResponseEntity<LoginErrorResponse> loginError(LoginError ex) {
-        LoginErrorResponse errorResponse = new LoginErrorResponse(ex.getHttpStatusCode(), ex.getMessage());
-        return ResponseEntity.status(ex.getHttpStatusCode()).body(errorResponse);
     }
 }

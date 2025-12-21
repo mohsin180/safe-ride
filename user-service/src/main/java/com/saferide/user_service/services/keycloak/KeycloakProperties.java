@@ -1,15 +1,11 @@
 package com.saferide.user_service.services.keycloak;
 
-import lombok.*;
+import lombok.Builder;
 import org.springframework.boot.context.properties.ConfigurationProperties;
 import org.springframework.stereotype.Component;
 
 @Component
 @ConfigurationProperties(prefix = "keycloak")
-@Getter
-@Setter
-@AllArgsConstructor
-@NoArgsConstructor
 @Builder
 public class KeycloakProperties {
     private String serverUrl;
@@ -17,4 +13,35 @@ public class KeycloakProperties {
     private String clientId;
     private String clientSecret;
 
+    public String getServerUrl() {
+        return serverUrl;
+    }
+
+    public void setServerUrl(String serverUrl) {
+        this.serverUrl = serverUrl;
+    }
+
+    public String getRealm() {
+        return realm;
+    }
+
+    public void setRealm(String realm) {
+        this.realm = realm;
+    }
+
+    public String getClientId() {
+        return clientId;
+    }
+
+    public void setClientId(String clientId) {
+        this.clientId = clientId;
+    }
+
+    public String getClientSecret() {
+        return clientSecret;
+    }
+
+    public void setClientSecret(String clientSecret) {
+        this.clientSecret = clientSecret;
+    }
 }

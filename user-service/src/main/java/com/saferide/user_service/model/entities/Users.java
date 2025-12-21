@@ -3,10 +3,6 @@ package com.saferide.user_service.model.entities;
 import com.saferide.user_service.model.enums.Gender;
 import com.saferide.user_service.model.enums.Role;
 import jakarta.persistence.*;
-import lombok.AllArgsConstructor;
-import lombok.Builder;
-import lombok.Data;
-import lombok.NoArgsConstructor;
 import org.springframework.data.annotation.CreatedDate;
 import org.springframework.data.jpa.domain.support.AuditingEntityListener;
 
@@ -15,10 +11,6 @@ import java.util.UUID;
 
 @Entity
 @Table(name = "users")
-@Data
-@NoArgsConstructor
-@AllArgsConstructor
-@Builder
 @EntityListeners(AuditingEntityListener.class)
 public class Users {
     @Id
@@ -36,8 +28,75 @@ public class Users {
     private Gender gender;
     @Column(nullable = false, unique = true)
     private UUID keycloakId;
-    @OneToOne(mappedBy = "user", cascade = CascadeType.ALL, orphanRemoval = true)
-    private PassengerProfile passengerProfile;
     @CreatedDate
     private LocalDateTime createdAt;
+
+    public Users() {
+    }
+
+    public Users(UUID id, String username, String email, Role role, Gender gender, UUID keycloakId, LocalDateTime createdAt) {
+        this.id = id;
+        this.username = username;
+        this.email = email;
+        this.role = role;
+        this.gender = gender;
+        this.keycloakId = keycloakId;
+        this.createdAt = createdAt;
+    }
+
+    public UUID getId() {
+        return id;
+    }
+
+    public void setId(UUID id) {
+        this.id = id;
+    }
+
+    public String getUsername() {
+        return username;
+    }
+
+    public void setUsername(String username) {
+        this.username = username;
+    }
+
+    public String getEmail() {
+        return email;
+    }
+
+    public void setEmail(String email) {
+        this.email = email;
+    }
+
+    public Role getRole() {
+        return role;
+    }
+
+    public void setRole(Role role) {
+        this.role = role;
+    }
+
+    public Gender getGender() {
+        return gender;
+    }
+
+    public void setGender(Gender gender) {
+        this.gender = gender;
+    }
+
+    public LocalDateTime getCreatedAt() {
+        return createdAt;
+    }
+
+    public void setCreatedAt(LocalDateTime createdAt) {
+        this.createdAt = createdAt;
+    }
+
+    public UUID getKeycloakId() {
+        return keycloakId;
+    }
+
+    public void setKeycloakId(UUID keycloakId) {
+        this.keycloakId = keycloakId;
+    }
 }

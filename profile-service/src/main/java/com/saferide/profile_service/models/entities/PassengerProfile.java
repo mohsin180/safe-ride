@@ -5,6 +5,7 @@ import lombok.AllArgsConstructor;
 import lombok.Data;
 import lombok.NoArgsConstructor;
 import org.springframework.data.annotation.CreatedDate;
+import org.springframework.data.jpa.domain.support.AuditingEntityListener;
 
 import java.time.LocalDateTime;
 import java.util.UUID;
@@ -14,6 +15,7 @@ import java.util.UUID;
 @AllArgsConstructor
 @NoArgsConstructor
 @Table(name = "passenger_profile")
+@EntityListeners(AuditingEntityListener.class)
 public class PassengerProfile {
     @Id
     @GeneratedValue(strategy = GenerationType.UUID)
@@ -24,7 +26,7 @@ public class PassengerProfile {
     private String profilePicture;
     @Column(nullable = false)
     private Double rating = 0.0;
-    @Column(nullable = false)
+    @Column(nullable = false, unique = true)
     private UUID userId;
     @CreatedDate
     private LocalDateTime createdAt;
