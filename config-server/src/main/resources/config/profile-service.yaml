@@ -10,3 +10,5 @@ spring:
     database-platform: org.hibernate.dialect.PostgreSQLDialect
 server:
   port: 8002
+file:
+  uploads-dir: uploads

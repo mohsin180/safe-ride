@@ -6,6 +6,7 @@ import com.saferide.profile_service.models.dtos.Role;
 import com.saferide.profile_service.service.ProfileService;
 import org.springframework.http.ResponseEntity;
 import org.springframework.web.bind.annotation.*;
+import org.springframework.web.multipart.MultipartFile;
 
 @RestController
 @RequestMapping("/api/v1/profile")
@@ -16,29 +17,31 @@ public class DriverProfileController {
         this.profileService = profileService;
     }
 
-    @PostMapping
+    @PostMapping("/driver")
     public ResponseEntity<DriverProfileResponse> createDriverProfile(
             @RequestHeader("X-User-Id") String userId,
             @RequestHeader("X-User-Role") Role role,
-            @RequestBody DriverProfileRequest request
+            @RequestPart DriverProfileRequest request,
+            @RequestPart(required = false) MultipartFile image
     ) {
         if (role == Role.DRIVER) {
             throw new RuntimeException("");
         }
-        DriverProfileResponse response = profileService.createDriverProfile(userId, request);
+        DriverProfileResponse response = profileService.createDriverProfile(userId, request, image);
         return ResponseEntity.ok(response);
     }
 
-    @GetMapping("/{id}")
+    @GetMapping("/driver/{id}")
     public ResponseEntity<DriverProfileResponse> getProfileById(@PathVariable String id) {
         DriverProfileResponse response = profileService.getDriverProfileById(id);
         return ResponseEntity.ok(response);
     }
 
-    @PutMapping("/id/update")
+    @PutMapping("/driver/{id}/update")
     public ResponseEntity<DriverProfileResponse> updatePassengerProfile(@PathVariable String id,
-                                                                        @RequestBody DriverProfileResponse request) {
-        DriverProfileResponse response = profileService.updateDriverProfile(id, request);
+                                                                        @RequestPart DriverProfileRequest request,
+                                                                        @RequestPart(required = false) MultipartFile image) {
+        DriverProfileResponse response = profileService.updateDriverProfile(id, request, image);
         return ResponseEntity.ok(response);
     }
 }

@@ -12,6 +12,7 @@ import com.saferide.profile_service.models.mappers.PassengerMapper;
 import com.saferide.profile_service.repos.DriverProfileRepository;
 import com.saferide.profile_service.repos.PassengerProfileRepository;
 import org.springframework.stereotype.Service;
+import org.springframework.web.multipart.MultipartFile;
 
 import java.util.UUID;
 
@@ -21,21 +22,30 @@ public class ProfileService {
     private final DriverProfileRepository driverRepo;
     private final PassengerMapper passengerMapper;
     private final DriverMapper driverMapper;
+    private final FileStorageService fileStorageService;
 
-    public ProfileService(PassengerProfileRepository passengerRepo, DriverProfileRepository driverRepo, PassengerMapper passengerMapper, DriverMapper driverMapper) {
+    public ProfileService(PassengerProfileRepository passengerRepo, DriverProfileRepository driverRepo, PassengerMapper passengerMapper, DriverMapper driverMapper, FileStorageService fileStorageService) {
         this.passengerRepo = passengerRepo;
         this.driverRepo = driverRepo;
         this.passengerMapper = passengerMapper;
         this.driverMapper = driverMapper;
+        this.fileStorageService = fileStorageService;
     }
 
     // passenger profile methods
-    public PassengerProfileResponse createPassengerProfile(String userId, PassengerProfileRequest request) {
+    public PassengerProfileResponse createPassengerProfile(String userId,
+                                                           PassengerProfileRequest request,
+                                                           MultipartFile image) {
         if (passengerRepo.existsByUserId(UUID.fromString(userId))) {
             throw new RuntimeException();
         }
         PassengerProfile passenger = passengerMapper.toPassenger(request);
         passenger.setUserId(UUID.fromString(userId));
+        if (image != null && !image.isEmpty()) {
+            String imageUrl = fileStorageService.storeImage(image, UUID.fromString(userId),
+                    "PASSENGER");
+            passenger.setProfilePicture(imageUrl);
+        }
         passengerRepo.save(passenger);
         return passengerMapper.toResponse(passenger);
     }
@@ -52,18 +62,30 @@ public class ProfileService {
     }
 
     public PassengerProfileResponse updatePassengerProfile(String id,
-                                                           PassengerProfileRequest request) {
-        return null;
+                                                           PassengerProfileRequest request,
+                                                           MultipartFile image) {
+        PassengerProfile profile = getProfile(id);
+        profile.setFullName(request.fullName());
+        if (image != null && !image.isEmpty()) {
+            String imageUrl = fileStorageService.storeImage(image, profile.getUserId(), "PASSENGER");
+            profile.setProfilePicture(imageUrl);
+        }
+        passengerRepo.save(profile);
+        return passengerMapper.toResponse(profile);
     }
 
 
     // driver profile methods
-    public DriverProfileResponse createDriverProfile(String userId, DriverProfileRequest request) {
+    public DriverProfileResponse createDriverProfile(String userId, DriverProfileRequest request, MultipartFile image) {
         if (driverRepo.existsByUserId(UUID.fromString(userId))) {
             throw new RuntimeException();
         }
         DriverProfile driver = driverMapper.toDriver(request);
         driver.setUserId(UUID.fromString(userId));
+        if (image != null && !image.isEmpty()) {
+            String imageUrl = fileStorageService.storeImage(image, UUID.fromString(userId), "DRIVER");
+            driver.setProfilePicture(imageUrl);
+        }
         driverRepo.save(driver);
         return driverMapper.toDriverResponse(driver);
     }
@@ -80,7 +102,18 @@ public class ProfileService {
     }
 
 
-    public DriverProfileResponse updateDriverProfile(String id, DriverProfileResponse request) {
-        return null;
+    public DriverProfileResponse updateDriverProfile(String id,
+                                                     DriverProfileRequest request, MultipartFile image) {
+        DriverProfile driver = getDriverProfile(id);
+        driver.setFullName(request.fullName());
+        driver.setVehicleModel(request.vehicleModel());
+        driver.setVehicleNumber(request.vehicleNumber());
+        driver.setLicenseNumber(request.licenseNumber());
+        if (image != null && !image.isEmpty()) {
+            String imageUrl = fileStorageService.storeImage(image, driver.getUserId(), "DRIVER");
+            driver.setProfilePicture(imageUrl);
+        }
+        driverRepo.save(driver);
+        return driverMapper.toDriverResponse(driver);
     }
 }

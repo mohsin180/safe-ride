@@ -35,6 +35,8 @@ public class DriverProfile {
     @Column(nullable = false)
     private String licenseNumber;
 
+    private String profilePicture;
+
     private Double driverRating = 0.0;
     @CreatedDate
     @Column(nullable = false)
