@@ -23,6 +23,15 @@
         <module name="profile-service" />
         <module name="user-service" />
       </profile>
+      <profile name="Annotation profile for ride-service" enabled="true">
+        <sourceOutputDir name="target/generated-sources/annotations" />
+        <sourceTestOutputDir name="target/generated-test-sources/test-annotations" />
+        <outputRelativeToContentRoot value="true" />
+        <processorPath useClasspath="false">
+          <entry name="$MAVEN_REPOSITORY$/org/projectlombok/lombok/1.18.42/lombok-1.18.42.jar" />
+        </processorPath>
+        <module name="ride-service" />
+      </profile>
     </annotationProcessing>
   </component>
   <component name="JavacSettings">
@@ -31,6 +40,7 @@
       <module name="config-server" options="-parameters" />
       <module name="discovery-server" options="-parameters" />
       <module name="profile-service" options="-parameters" />
+      <module name="ride-service" options="-parameters" />
       <module name="user-service" options="-parameters" />
     </option>
   </component>
