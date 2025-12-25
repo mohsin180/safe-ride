@@ -1,4 +1,4 @@
-package com.saferide.ride_service.model;
+package com.saferide.ride_service.model.entity;
 
 import jakarta.persistence.*;
 import lombok.AllArgsConstructor;
