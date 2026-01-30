@@ -17,7 +17,7 @@ spring:
     oauth2:
       resourceserver:
         jwt:
-          issuer-uri: http://localhost:9000/realms/portfolio-builder
+          issuer-uri: http://localhost:9000/realms/safe_ride
 
 server:
   port: 8080

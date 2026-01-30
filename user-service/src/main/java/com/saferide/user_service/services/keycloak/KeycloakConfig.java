@@ -14,6 +14,7 @@ public class KeycloakConfig {
                 .realm(properties.getRealm())
                 .clientId(properties.getClientId())
                 .clientSecret(properties.getClientSecret())
+                .grantType("client_credentials")
                 .build();
     }
 }

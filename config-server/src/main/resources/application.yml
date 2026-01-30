@@ -8,6 +8,9 @@ spring:
     config:
       server:
         native:
-          search-locations: file:///D:/projects/safe-ride/config-server/src/main/resources/config
+          search-locations: classpath:/config/
 server:
   port: 8888
+logging:
+  level:
+    org.springframework.cloud.config: DEBUG

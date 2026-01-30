@@ -1,12 +1,10 @@
 package com.saferide.user_service.services.keycloak;
 
-import lombok.Builder;
 import org.springframework.boot.context.properties.ConfigurationProperties;
 import org.springframework.stereotype.Component;
 
 @Component
 @ConfigurationProperties(prefix = "keycloak")
-@Builder
 public class KeycloakProperties {
     private String serverUrl;
     private String realm;
