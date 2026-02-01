@@ -1,7 +1,6 @@
 package com.saferide.user_service.model.dtos;
 
 import com.saferide.user_service.model.enums.Gender;
-import com.saferide.user_service.model.enums.Role;
 import jakarta.validation.constraints.Email;
 import jakarta.validation.constraints.NotBlank;
 
@@ -13,8 +12,6 @@ public record RegisterRequest(
         String email,
         @NotBlank(message = "password is required")
         String password,
-        @NotBlank(message = "Role is required")
-        Role role,
         @NotBlank(message = "Gender is required")
         Gender gender
 ) {

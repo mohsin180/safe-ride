@@ -1,7 +1,6 @@
 package com.saferide.user_service.model.entities;
 
 import com.saferide.user_service.model.enums.Gender;
-import com.saferide.user_service.model.enums.Role;
 import jakarta.persistence.*;
 import org.springframework.data.annotation.CreatedDate;
 import org.springframework.data.jpa.domain.support.AuditingEntityListener;
@@ -22,9 +21,6 @@ public class Users {
     private String email;
     @Column(nullable = false)
     @Enumerated(EnumType.STRING)
-    private Role role;
-    @Column(nullable = false)
-    @Enumerated(EnumType.STRING)
     private Gender gender;
     @Column(nullable = false, unique = true)
     private UUID keycloakId;
@@ -34,11 +30,10 @@ public class Users {
     public Users() {
     }
 
-    public Users(UUID id, String username, String email, Role role, Gender gender, UUID keycloakId, LocalDateTime createdAt) {
+    public Users(UUID id, String username, String email, Gender gender, UUID keycloakId, LocalDateTime createdAt) {
         this.id = id;
         this.username = username;
         this.email = email;
-        this.role = role;
         this.gender = gender;
         this.keycloakId = keycloakId;
         this.createdAt = createdAt;
@@ -66,14 +61,6 @@ public class Users {
 
     public void setEmail(String email) {
         this.email = email;
-    }
-
-    public Role getRole() {
-        return role;
-    }
-
-    public void setRole(Role role) {
-        this.role = role;
     }
 
     public Gender getGender() {
