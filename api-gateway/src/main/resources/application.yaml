@@ -1,6 +1,24 @@
 spring:
   application:
     name: api-gateway
-  config:
-    import: optional:configserver:http://localhost:8888
+  cloud:
+    gateway:
+      routes:
+        - id: user-service
+          uri: http://localhost:8001
+          predicates:
+            - Path=/api/v1/user/**
+        - id: profile-service
+          uri: http://localhost:8002
+          predicates:
+            - Path=/api/v1/profile/**
+
+  security:
+    oauth2:
+      resourceserver:
+        jwt:
+          issuer-uri: http://localhost:9000/realms/safe_ride
+
+server:
+  port: 8080
 
