@@ -12,6 +12,8 @@ public record RegisterRequest(
         String email,
         @NotBlank(message = "password is required")
         String password,
+        @NotBlank(message = "phoneNo is required")
+        String phoneNo,
         @NotBlank(message = "Gender is required")
         Gender gender
 ) {

@@ -5,22 +5,22 @@ import com.saferide.user_service.model.dtos.LoginResponse;
 import com.saferide.user_service.model.dtos.RegisterRequest;
 import com.saferide.user_service.model.dtos.RegisterResponse;
 import com.saferide.user_service.services.UserService;
+import com.saferide.user_service.services.keycloak.KeycloakAdminClient;
 import org.springframework.beans.factory.annotation.Autowired;
 import org.springframework.http.ResponseEntity;
-import org.springframework.web.bind.annotation.PostMapping;
-import org.springframework.web.bind.annotation.RequestBody;
-import org.springframework.web.bind.annotation.RequestMapping;
-import org.springframework.web.bind.annotation.RestController;
+import org.springframework.web.bind.annotation.*;
 
 @RestController
 @RequestMapping("/api/v1/user")
 public class UserController {
 
     private final UserService userService;
+    private final KeycloakAdminClient keycloakAdminClient;
 
     @Autowired
-    public UserController(UserService userService) {
+    public UserController(UserService userService, KeycloakAdminClient keycloakAdminClient) {
         this.userService = userService;
+        this.keycloakAdminClient = keycloakAdminClient;
     }
 
     @PostMapping("/register")
@@ -33,5 +33,11 @@ public class UserController {
     public ResponseEntity<LoginResponse> loginUser(@RequestBody LoginRequest request) {
         LoginResponse response = userService.loginUser(request);
         return ResponseEntity.ok(response);
+    }
+
+    @PutMapping("/{userId}/verify-email")
+    public ResponseEntity<Void> verifyEmail(String userId) {
+        keycloakAdminClient.verifyEmail(userId);
+        return ResponseEntity.ok().build();
     }
 }

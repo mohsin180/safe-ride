@@ -5,12 +5,12 @@ spring:
     gateway:
       routes:
         - id: user-service
-          uri: http://localhost:8001
-          predicates:
+        - uri: http://localhost:8001
+        - predicates:
             - Path=/api/v1/user/**
         - id: profile-service
-          uri: http://localhost:8002
-          predicates:
+        - uri: http://localhost:8002
+        - predicates:
             - Path=/api/v1/profile/**
 
   security:

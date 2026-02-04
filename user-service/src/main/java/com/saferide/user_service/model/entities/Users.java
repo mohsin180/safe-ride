@@ -24,18 +24,21 @@ public class Users {
     private Gender gender;
     @Column(nullable = false, unique = true)
     private UUID keycloakId;
+    @Column(nullable = false)
+    private String phoneNo;
     @CreatedDate
     private LocalDateTime createdAt;
 
     public Users() {
     }
 
-    public Users(UUID id, String username, String email, Gender gender, UUID keycloakId, LocalDateTime createdAt) {
+    public Users(UUID id, String username, String email, Gender gender, UUID keycloakId, String phoneNo, LocalDateTime createdAt) {
         this.id = id;
         this.username = username;
         this.email = email;
         this.gender = gender;
         this.keycloakId = keycloakId;
+        this.phoneNo = phoneNo;
         this.createdAt = createdAt;
     }
 
@@ -77,6 +80,14 @@ public class Users {
 
     public void setCreatedAt(LocalDateTime createdAt) {
         this.createdAt = createdAt;
+    }
+
+    public String getPhoneNo() {
+        return phoneNo;
+    }
+
+    public void setPhoneNo(String phoneNo) {
+        this.phoneNo = phoneNo;
     }
 
     public UUID getKeycloakId() {

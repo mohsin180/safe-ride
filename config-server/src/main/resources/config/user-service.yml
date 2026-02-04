@@ -5,7 +5,7 @@ spring:
     password: secret
   jpa:
     hibernate:
-      ddl-auto: update   # options: validate, update, create, create-drop
+      ddl-auto: create   # options: validate, update, create, create-drop
     database-platform: org.hibernate.dialect.PostgreSQLDialect
 server:
   port: 8001

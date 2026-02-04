@@ -8,10 +8,12 @@ import com.saferide.user_service.model.dtos.RegisterRequest;
 import jakarta.ws.rs.core.Response;
 import org.jspecify.annotations.Nullable;
 import org.keycloak.admin.client.Keycloak;
+import org.keycloak.admin.client.resource.UsersResource;
 import org.keycloak.representations.idm.CredentialRepresentation;
 import org.keycloak.representations.idm.UserRepresentation;
 import org.springframework.http.*;
 import org.springframework.stereotype.Component;
+import org.springframework.util.CollectionUtils;
 import org.springframework.util.LinkedMultiValueMap;
 import org.springframework.util.MultiValueMap;
 import org.springframework.web.client.RestTemplate;
@@ -19,6 +21,7 @@ import org.springframework.web.client.RestTemplate;
 import java.util.Collections;
 import java.util.List;
 import java.util.Map;
+import java.util.Objects;
 
 @Component
 public class KeycloakAdminClient {
@@ -35,7 +38,7 @@ public class KeycloakAdminClient {
         userRepresentation.setUsername(request.username());
         userRepresentation.setEmail(request.email());
         userRepresentation.setEnabled(true);
-        userRepresentation.setEmailVerified(true);
+        userRepresentation.setEmailVerified(false);
 
         CredentialRepresentation passwordCred = new CredentialRepresentation();
         passwordCred.setTemporary(false);
@@ -59,12 +62,31 @@ public class KeycloakAdminClient {
                 .create(userRepresentation);
 
         if (response.getStatus() != 201) {
-            throw new RegistrationError("Failed to create user: " + response.getStatus(), response.getStatus());
+            throw new RegistrationError("Failed to create user: " + response.getStatus(),
+                    response.getStatus());
+
         }
+        UsersResource usersResource = keycloak.realm(properties.getRealm()).users();
+        List<UserRepresentation> userRepresentations =
+                usersResource.searchByUsername(userRepresentation.getUsername(), true);
+        if (!CollectionUtils.isEmpty(userRepresentations)) {
+            UserRepresentation representation = userRepresentations.stream().
+                    filter(user ->
+                            Objects.equals(false, userRepresentation.isEmailVerified()))
+                    .findFirst().orElse(null);
+            assert representation != null;
+            verifyEmail(representation.getId());
+        }
+
 
         // Extract Keycloak ID
         String location = response.getLocation().toString();
         return location.substring(location.lastIndexOf("/") + 1);
+    }
+
+    public void verifyEmail(String userId) {
+        UsersResource usersResource = keycloak.realm(properties.getRealm()).users();
+        usersResource.get(userId).sendVerifyEmail();
     }
 
     public LoginResponse loginUser(LoginRequest request) {
