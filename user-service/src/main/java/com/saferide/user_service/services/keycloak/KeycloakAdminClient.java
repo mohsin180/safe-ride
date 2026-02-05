@@ -55,34 +55,33 @@ public class KeycloakAdminClient {
     public String createUserInKeycloak(RegisterRequest request) {
         UserRepresentation userRepresentation = getUserRepresentation(request);
 
-        // Create user
         Response response = keycloak
                 .realm(properties.getRealm())
                 .users()
                 .create(userRepresentation);
 
-        if (response.getStatus() != 201) {
-            throw new RegistrationError("Failed to create user: " + response.getStatus(),
-                    response.getStatus());
-
+        try {
+            if (response.getStatus() != 201) {
+                String error = response.readEntity(String.class);
+                throw new RegistrationError("Failed to create user: " + error, response.getStatus());
+            }
+        } finally {
+            response.close();
         }
+
         UsersResource usersResource = keycloak.realm(properties.getRealm()).users();
-        List<UserRepresentation> userRepresentations =
+        List<UserRepresentation> users =
                 usersResource.searchByUsername(userRepresentation.getUsername(), true);
-        if (!CollectionUtils.isEmpty(userRepresentations)) {
-            UserRepresentation representation = userRepresentations.stream().
-                    filter(user ->
-                            Objects.equals(false, userRepresentation.isEmailVerified()))
-                    .findFirst().orElse(null);
-            assert representation != null;
-            verifyEmail(representation.getId());
-        }
 
+        UserRepresentation createdUser = users.stream()
+                .findFirst()
+                .orElseThrow(() -> new RuntimeException("User not found in Keycloak after creation"));
 
-        // Extract Keycloak ID
-        String location = response.getLocation().toString();
-        return location.substring(location.lastIndexOf("/") + 1);
+        verifyEmail(createdUser.getId());
+
+        return createdUser.getId();
     }
+
 
     public void verifyEmail(String userId) {
         UsersResource usersResource = keycloak.realm(properties.getRealm()).users();

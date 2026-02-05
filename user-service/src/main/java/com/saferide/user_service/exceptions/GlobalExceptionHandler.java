@@ -1,5 +1,8 @@
 package com.saferide.user_service.exceptions;
 
+import lombok.extern.slf4j.Slf4j;
+import org.slf4j.Logger;
+import org.slf4j.LoggerFactory;
 import org.springframework.http.HttpStatus;
 import org.springframework.http.ResponseEntity;
 import org.springframework.validation.BindingResult;
@@ -12,8 +15,10 @@ import java.util.HashMap;
 import java.util.List;
 import java.util.Map;
 
+
 @RestControllerAdvice
 public class GlobalExceptionHandler {
+    Logger logger = LoggerFactory.getLogger(GlobalExceptionHandler.class);
     @ExceptionHandler(MethodArgumentNotValidException.class)
     public ResponseEntity<Map<String, String>> MethodArgumentNotValidException(MethodArgumentNotValidException ex) {
         Map<String, String> errorResponse = new HashMap<>();
@@ -35,6 +40,7 @@ public class GlobalExceptionHandler {
     @ExceptionHandler(RuntimeException.class)
     public ResponseEntity<ErrorResponse> runTimeException(RuntimeException ex) {
         ErrorResponse errorResponse = new ErrorResponse(HttpStatus.INTERNAL_SERVER_ERROR.value(), ex.getMessage());
+        logger.error(ex.getMessage(), ex);
         return new ResponseEntity<>(errorResponse, HttpStatus.INTERNAL_SERVER_ERROR);
     }
 

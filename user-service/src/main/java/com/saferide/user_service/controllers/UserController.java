@@ -36,7 +36,7 @@ public class UserController {
     }
 
     @PutMapping("/{userId}/verify-email")
-    public ResponseEntity<Void> verifyEmail(String userId) {
+    public ResponseEntity<Void> verifyEmail(@PathVariable String userId) {
         keycloakAdminClient.verifyEmail(userId);
         return ResponseEntity.ok().build();
     }
