@@ -13,15 +13,11 @@ import org.keycloak.representations.idm.CredentialRepresentation;
 import org.keycloak.representations.idm.UserRepresentation;
 import org.springframework.http.*;
 import org.springframework.stereotype.Component;
-import org.springframework.util.CollectionUtils;
 import org.springframework.util.LinkedMultiValueMap;
 import org.springframework.util.MultiValueMap;
 import org.springframework.web.client.RestTemplate;
 
-import java.util.Collections;
-import java.util.List;
-import java.util.Map;
-import java.util.Objects;
+import java.util.*;
 
 @Component
 public class KeycloakAdminClient {
@@ -80,6 +76,14 @@ public class KeycloakAdminClient {
         verifyEmail(createdUser.getId());
 
         return createdUser.getId();
+    }
+
+    public Boolean isEmailVerified(String userId){
+      UserRepresentation user=keycloak.realm(properties.getRealm())
+              .users()
+              .get(userId)
+              .toRepresentation();
+      return Boolean.TRUE.equals(user.isEmailVerified());
     }
 
 
