@@ -20,10 +20,12 @@ public class Users {
     @Column(nullable = false, unique = true)
     private String email;
     @Column(nullable = false)
+    private String password;
+    @Column(nullable = false)
     @Enumerated(EnumType.STRING)
     private Gender gender;
     @Column(nullable = false, unique = true)
-    private UUID keycloakId;
+    private String keycloakId;
     @Column(nullable = false)
     private String phoneNo;
     @CreatedDate
@@ -32,10 +34,11 @@ public class Users {
     public Users() {
     }
 
-    public Users(UUID id, String username, String email, Gender gender, UUID keycloakId, String phoneNo, LocalDateTime createdAt) {
+    public Users(UUID id, String username, String email, String password, Gender gender, String keycloakId, String phoneNo, LocalDateTime createdAt) {
         this.id = id;
         this.username = username;
         this.email = email;
+        this.password = password;
         this.gender = gender;
         this.keycloakId = keycloakId;
         this.phoneNo = phoneNo;
@@ -66,6 +69,14 @@ public class Users {
         this.email = email;
     }
 
+    public String getPassword() {
+        return password;
+    }
+
+    public void setPassword(String password) {
+        this.password = password;
+    }
+
     public Gender getGender() {
         return gender;
     }
@@ -90,11 +101,11 @@ public class Users {
         this.phoneNo = phoneNo;
     }
 
-    public UUID getKeycloakId() {
+    public String getKeycloakId() {
         return keycloakId;
     }
 
-    public void setKeycloakId(UUID keycloakId) {
+    public void setKeycloakId(String keycloakId) {
         this.keycloakId = keycloakId;
     }
 }
