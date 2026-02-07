@@ -5,6 +5,7 @@ import com.saferide.user_service.model.enums.Gender;
 public record RegisterResponse(
         String username,
         String email,
-        Gender gender
+        Gender gender,
+        String keycloakId
 ) {
 }

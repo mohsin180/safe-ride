@@ -40,6 +40,7 @@ public class UserController {
         keycloakAdminClient.verifyEmail(userId);
         return ResponseEntity.ok().build();
     }
+
     @GetMapping("/{userId}/is-Email-Verified")
     public ResponseEntity<Boolean> isEmailVerified(@PathVariable String userId) {
         boolean emailVerified = keycloakAdminClient.isEmailVerified(userId);

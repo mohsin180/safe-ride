@@ -17,7 +17,9 @@ import org.springframework.util.LinkedMultiValueMap;
 import org.springframework.util.MultiValueMap;
 import org.springframework.web.client.RestTemplate;
 
-import java.util.*;
+import java.util.Collections;
+import java.util.List;
+import java.util.Map;
 
 @Component
 public class KeycloakAdminClient {
@@ -78,12 +80,12 @@ public class KeycloakAdminClient {
         return createdUser.getId();
     }
 
-    public Boolean isEmailVerified(String userId){
-      UserRepresentation user=keycloak.realm(properties.getRealm())
-              .users()
-              .get(userId)
-              .toRepresentation();
-      return Boolean.TRUE.equals(user.isEmailVerified());
+    public Boolean isEmailVerified(String userId) {
+        UserRepresentation user = keycloak.realm(properties.getRealm())
+                .users()
+                .get(userId)
+                .toRepresentation();
+        return Boolean.TRUE.equals(user.isEmailVerified());
     }
 
 
