@@ -1,14 +1,13 @@
 package com.saferide.user_service.controllers;
 
-import com.saferide.user_service.model.dtos.LoginRequest;
-import com.saferide.user_service.model.dtos.LoginResponse;
-import com.saferide.user_service.model.dtos.RegisterRequest;
-import com.saferide.user_service.model.dtos.RegisterResponse;
+import com.saferide.user_service.model.dtos.*;
 import com.saferide.user_service.services.UserService;
 import com.saferide.user_service.services.keycloak.KeycloakAdminClient;
 import org.springframework.beans.factory.annotation.Autowired;
 import org.springframework.http.ResponseEntity;
 import org.springframework.web.bind.annotation.*;
+
+import java.util.Map;
 
 @RestController
 @RequestMapping("/api/v1/user")
@@ -35,15 +34,22 @@ public class UserController {
         return ResponseEntity.ok(response);
     }
 
-    @PutMapping("/{userId}/verify-email")
-    public ResponseEntity<Void> verifyEmail(@PathVariable String userId) {
-        keycloakAdminClient.verifyEmail(userId);
-        return ResponseEntity.ok().build();
-    }
-
     @GetMapping("/{userId}/is-Email-Verified")
     public ResponseEntity<Boolean> isEmailVerified(@PathVariable String userId) {
         boolean emailVerified = keycloakAdminClient.isEmailVerified(userId);
         return ResponseEntity.ok(emailVerified);
+    }
+
+    @PostMapping("/forgot-password")
+    public ResponseEntity<Void> forgotPassword(@RequestBody Map<String, String> body) {
+        String email = body.get("email");
+        keycloakAdminClient.sendResetPassword(email);
+        return ResponseEntity.ok().build();
+    }
+
+    @PostMapping("/reset-password")
+    public ResponseEntity<Void> resetPassword(@RequestBody ResetPasswordRequest request) {
+        keycloakAdminClient.updatePassword(request);
+        return ResponseEntity.ok().build();
     }
 }
