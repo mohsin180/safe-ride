@@ -5,7 +5,6 @@ import com.saferide.user_service.exceptions.RegistrationError;
 import com.saferide.user_service.model.dtos.LoginRequest;
 import com.saferide.user_service.model.dtos.LoginResponse;
 import com.saferide.user_service.model.dtos.RegisterRequest;
-import com.saferide.user_service.model.dtos.ResetPasswordRequest;
 import jakarta.ws.rs.core.Response;
 import org.jspecify.annotations.Nullable;
 import org.keycloak.admin.client.Keycloak;
@@ -127,21 +126,21 @@ public class KeycloakAdminClient {
         }
     }
 
-    public void sendResetPassword(String email) {
-        UsersResource usersResource = keycloak.realm(properties.getRealm()).users();
-        List<UserRepresentation> representation = usersResource.searchByEmail(email, true);
-        String userId = representation.get(0).getId();
-        usersResource.get(userId)
-                .executeActionsEmail(List.of("UPDATE_PASSWORD"));
-    }
+//    public void sendResetPassword(String email) {
+//        UsersResource usersResource = keycloak.realm(properties.getRealm()).users();
+//        List<UserRepresentation> representation = usersResource.searchByEmail(email, true);
+//        String userId = representation.get(0).getId();
+//        usersResource.get(userId)
+//                .executeActionsEmail(List.of("UPDATE_PASSWORD"));
+//    }
 
-    public void updatePassword(ResetPasswordRequest request) {
+    public void updatePassword(String keycloakId, String newPassword) {
         CredentialRepresentation representation = new CredentialRepresentation();
         representation.setType(CredentialRepresentation.PASSWORD);
         representation.setTemporary(false);
-        representation.setValue(request.newPassword());
+        representation.setValue(newPassword);
 
-        keycloak.realm(properties.getRealm()).users().get(request.userId())
+        keycloak.realm(properties.getRealm()).users().get(keycloakId)
                 .resetPassword(representation);
     }
 }

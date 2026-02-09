@@ -7,8 +7,6 @@ import org.springframework.beans.factory.annotation.Autowired;
 import org.springframework.http.ResponseEntity;
 import org.springframework.web.bind.annotation.*;
 
-import java.util.Map;
-
 @RestController
 @RequestMapping("/api/v1/user")
 public class UserController {
@@ -41,15 +39,26 @@ public class UserController {
     }
 
     @PostMapping("/forgot-password")
-    public ResponseEntity<Void> forgotPassword(@RequestBody Map<String, String> body) {
-        String email = body.get("email");
-        keycloakAdminClient.sendResetPassword(email);
-        return ResponseEntity.ok().build();
+    public ResponseEntity<String> forgotPassword(@RequestBody ForgotPasswordDto request) {
+        userService.sentResetLink(request.email());
+        return ResponseEntity.ok("Reset link has been sent");
     }
 
     @PostMapping("/reset-password")
-    public ResponseEntity<Void> resetPassword(@RequestBody ResetPasswordRequest request) {
-        keycloakAdminClient.updatePassword(request);
-        return ResponseEntity.ok().build();
+    public ResponseEntity<String> resetPassword(@RequestBody ResetPasswordRequest request) {
+        userService.resetPassword(request.token(), request.newPassword());
+        return ResponseEntity.ok("Password updated successfully");
+    }
+
+    @GetMapping("/reset/click")
+    public ResponseEntity<?> click(@RequestParam String token) {
+        userService.markClicked(token);
+        return ResponseEntity.ok("Email verified you can go back to app now.");
+    }
+
+    @GetMapping("/reset/status")
+    public ResponseEntity<ResetStatusResponse> status(@RequestParam String token) {
+        boolean verified = userService.isVerified(token);
+        return ResponseEntity.ok(new ResetStatusResponse(verified));
     }
 }
