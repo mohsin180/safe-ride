@@ -61,4 +61,11 @@ public class UserController {
         boolean verified = userService.isVerified(token);
         return ResponseEntity.ok(new ResetStatusResponse(verified));
     }
+
+    @PostMapping("/assign-role")
+    public ResponseEntity<Void> assignRole(@RequestBody AssignRoleRequest request,
+                                           @RequestHeader("X-User-Id") String keycloakId) {
+        keycloakAdminClient.assignRealmRole(keycloakId, request.role().name());
+        return ResponseEntity.ok().build();
+    }
 }

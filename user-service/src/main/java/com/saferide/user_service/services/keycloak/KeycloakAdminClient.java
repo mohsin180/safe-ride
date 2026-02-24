@@ -126,14 +126,6 @@ public class KeycloakAdminClient {
         }
     }
 
-//    public void sendResetPassword(String email) {
-//        UsersResource usersResource = keycloak.realm(properties.getRealm()).users();
-//        List<UserRepresentation> representation = usersResource.searchByEmail(email, true);
-//        String userId = representation.get(0).getId();
-//        usersResource.get(userId)
-//                .executeActionsEmail(List.of("UPDATE_PASSWORD"));
-//    }
-
     public void updatePassword(String keycloakId, String newPassword) {
         CredentialRepresentation representation = new CredentialRepresentation();
         representation.setType(CredentialRepresentation.PASSWORD);
@@ -142,5 +134,26 @@ public class KeycloakAdminClient {
 
         keycloak.realm(properties.getRealm()).users().get(keycloakId)
                 .resetPassword(representation);
+    }
+
+    public void assignRealmRole(String keycloakId, String roleName) {
+        var realm = keycloak.realm(properties.getRealm());
+        var userRoles = realm.users()
+                .get(keycloakId)
+                .roles()
+                .realmLevel()
+                .listAll();
+        if (!userRoles.isEmpty()) {
+            throw new IllegalStateException("Role already assigned");
+        }
+
+        var role = realm.roles()
+                .get(roleName).toRepresentation();
+
+        realm.users()
+                .get(keycloakId)
+                .roles()
+                .realmLevel()
+                .add(List.of(role));
     }
 }

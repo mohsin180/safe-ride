@@ -1,2 +1,4 @@
 CREATE DATABASE user_db;
 CREATE DATABASE keycloak_db;
+CREATE DATABASE profile_db;
+CREATE DATABASE ride_db;
