@@ -21,14 +21,9 @@ public class PassengerProfileController {
     @PostMapping("/passenger")
     public ResponseEntity<PassengerProfileResponse> createPassengerProfile(
             @RequestHeader("X-User-Id") String userId,
-            @RequestHeader("X-User-Role") Role role,
-            @RequestBody PassengerProfileRequest request,
-            @RequestPart(required = false) MultipartFile image
+            @RequestBody PassengerProfileRequest request
     ) {
-        if (role == Role.PASSENGER) {
-            throw new RuntimeException("");
-        }
-        PassengerProfileResponse response = profileService.createPassengerProfile(userId, request, image);
+        PassengerProfileResponse response = profileService.createPassengerProfile(userId, request);
         return ResponseEntity.ok(response);
     }
 
@@ -40,10 +35,9 @@ public class PassengerProfileController {
 
     @PutMapping("/passenger/{id}/update")
     public ResponseEntity<PassengerProfileResponse> updatePassengerProfile(@PathVariable String id,
-                                                                           @RequestPart PassengerProfileRequest request,
-                                                                           @RequestPart(required = false) MultipartFile image
+                                                                           @RequestPart PassengerProfileRequest request
     ) {
-        PassengerProfileResponse response = profileService.updatePassengerProfile(id, request, image);
+        PassengerProfileResponse response = profileService.updatePassengerProfile(id, request);
         return ResponseEntity.ok(response);
     }
 }

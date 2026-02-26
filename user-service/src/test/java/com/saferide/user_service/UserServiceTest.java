@@ -38,7 +38,7 @@ public class UserServiceTest {
                 "mohsin",
                 "mughal@gmail.com",
                 "kgfpart@2",
-                Role.DRIVER,
+                "03249503132",
                 Gender.MALE
         );
         Users users = new Users();

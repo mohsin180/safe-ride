@@ -34,18 +34,13 @@ public class ProfileService {
 
     // passenger profile methods
     public PassengerProfileResponse createPassengerProfile(String userId,
-                                                           PassengerProfileRequest request,
-                                                           MultipartFile image) {
+                                                           PassengerProfileRequest request
+                                                           ) {
         if (passengerRepo.existsByUserId(UUID.fromString(userId))) {
             throw new RuntimeException();
         }
         PassengerProfile passenger = passengerMapper.toPassenger(request);
         passenger.setUserId(UUID.fromString(userId));
-        if (image != null && !image.isEmpty()) {
-            String imageUrl = fileStorageService.storeImage(image, UUID.fromString(userId),
-                    "PASSENGER");
-            passenger.setProfilePicture(imageUrl);
-        }
         passengerRepo.save(passenger);
         return passengerMapper.toResponse(passenger);
     }
@@ -62,14 +57,10 @@ public class ProfileService {
     }
 
     public PassengerProfileResponse updatePassengerProfile(String id,
-                                                           PassengerProfileRequest request,
-                                                           MultipartFile image) {
+                                                           PassengerProfileRequest request) {
         PassengerProfile profile = getProfile(id);
         profile.setFullName(request.fullName());
-        if (image != null && !image.isEmpty()) {
-            String imageUrl = fileStorageService.storeImage(image, profile.getUserId(), "PASSENGER");
-            profile.setProfilePicture(imageUrl);
-        }
+
         passengerRepo.save(profile);
         return passengerMapper.toResponse(profile);
     }

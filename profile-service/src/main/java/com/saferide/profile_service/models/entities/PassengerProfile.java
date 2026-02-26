@@ -1,5 +1,6 @@
 package com.saferide.profile_service.models.entities;
 
+import com.saferide.profile_service.models.dtos.Role;
 import jakarta.persistence.*;
 import lombok.AllArgsConstructor;
 import lombok.Data;
@@ -22,8 +23,11 @@ public class PassengerProfile {
     private UUID id;
     @Column(nullable = false)
     private String fullName;
-
-    private String profilePicture;
+    @Column(nullable = false)
+    private String cnic;
+    @Column(nullable = false)
+    @Enumerated(EnumType.STRING)
+    private Role role;
     @Column(nullable = false)
     private Double rating = 0.0;
     @Column(nullable = false, unique = true)

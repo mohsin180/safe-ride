@@ -135,25 +135,4 @@ public class KeycloakAdminClient {
         keycloak.realm(properties.getRealm()).users().get(keycloakId)
                 .resetPassword(representation);
     }
-
-    public void assignRealmRole(String keycloakId, String roleName) {
-        var realm = keycloak.realm(properties.getRealm());
-        var userRoles = realm.users()
-                .get(keycloakId)
-                .roles()
-                .realmLevel()
-                .listAll();
-        if (!userRoles.isEmpty()) {
-            throw new IllegalStateException("Role already assigned");
-        }
-
-        var role = realm.roles()
-                .get(roleName).toRepresentation();
-
-        realm.users()
-                .get(keycloakId)
-                .roles()
-                .realmLevel()
-                .add(List.of(role));
-    }
 }
