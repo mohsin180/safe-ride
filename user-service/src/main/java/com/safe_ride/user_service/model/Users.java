@@ -26,4 +26,6 @@ public class Users {
     @Column(nullable = false)
     @Enumerated(EnumType.STRING)
     private Gender gender;
+    @Column(nullable = false)
+    private boolean enabled = true;
 }

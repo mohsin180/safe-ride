@@ -2,11 +2,9 @@ package com.saferide.profile_service.controllers;
 
 import com.saferide.profile_service.models.dtos.PassengerProfileRequest;
 import com.saferide.profile_service.models.dtos.PassengerProfileResponse;
-import com.saferide.profile_service.models.dtos.Role;
 import com.saferide.profile_service.service.ProfileService;
 import org.springframework.http.ResponseEntity;
 import org.springframework.web.bind.annotation.*;
-import org.springframework.web.multipart.MultipartFile;
 
 @RestController
 @RequestMapping("/api/v1/profile")

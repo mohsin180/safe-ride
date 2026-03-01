@@ -35,7 +35,7 @@ public class ProfileService {
     // passenger profile methods
     public PassengerProfileResponse createPassengerProfile(String userId,
                                                            PassengerProfileRequest request
-                                                           ) {
+    ) {
         if (passengerRepo.existsByUserId(UUID.fromString(userId))) {
             throw new RuntimeException();
         }
