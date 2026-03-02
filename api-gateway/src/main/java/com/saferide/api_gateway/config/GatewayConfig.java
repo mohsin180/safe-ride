@@ -11,8 +11,8 @@ public class GatewayConfig {
     @Bean
     public RouteLocator customRoutes(RouteLocatorBuilder builder) {
         return builder.routes()
-                .route("user-service", r -> r
-                        .path("/api/v1/user/**")
+                .route("user-services", r -> r
+                        .path("/api/v1/auth/**")
                         .uri("http://localhost:8001")
                 )
                 .route("profile-service", r -> r

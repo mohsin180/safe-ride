@@ -5,7 +5,7 @@ spring:
     password: secret
   jpa:
     hibernate:
-      ddl-auto: create   # options: validate, update, create, create-drop
+      ddl-auto: update   # options: validate, update, create, create-drop
     database-platform: org.hibernate.dialect.PostgreSQLDialect
   mail:
     host: smtp.gmail.com
@@ -20,3 +20,6 @@ spring:
             enable: true
 server:
   port: 8001
+jwt:
+  secret: U2FmZVJpZGVTZWNyZXRLZXlGb3JKV1RUb2tlbkdlbmVyYXRpb24yMDI2U3ByaW5nQm9vdA==
+  expiration: 86400000

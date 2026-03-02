@@ -13,9 +13,7 @@ import java.util.List;
 
 public class RoleGenderAuthorizationFilter implements GlobalFilter, Ordered {
     private static final List<String> PUBLIC_PATHS = List.of(
-            "api/auth/register",
-            "api/auth/login",
-            "api/auth/select-role"
+            "/api/v1/auth/"
     );
 
     @Override

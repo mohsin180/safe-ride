@@ -1,16 +1,10 @@
 package com.safe_ride.user_service.controller;
 
-import com.safe_ride.user_service.model.dtos.LoginRequest;
-import com.safe_ride.user_service.model.dtos.LoginResponse;
-import com.safe_ride.user_service.model.dtos.RegisterRequest;
-import com.safe_ride.user_service.model.dtos.UserResponse;
+import com.safe_ride.user_service.model.dtos.*;
 import com.safe_ride.user_service.services.UserService;
 import org.apache.coyote.BadRequestException;
 import org.springframework.http.ResponseEntity;
-import org.springframework.web.bind.annotation.PostMapping;
-import org.springframework.web.bind.annotation.RequestBody;
-import org.springframework.web.bind.annotation.RequestMapping;
-import org.springframework.web.bind.annotation.RestController;
+import org.springframework.web.bind.annotation.*;
 
 @RestController
 @RequestMapping("/api/v1/auth")
@@ -31,5 +25,12 @@ public class UserController {
     public ResponseEntity<LoginResponse> login(@RequestBody LoginRequest request) throws BadRequestException {
         LoginResponse login = userService.login(request);
         return ResponseEntity.ok(login);
+    }
+
+    @PostMapping("/{id}/select-role")
+    public ResponseEntity<LoginResponse> selectRole(@PathVariable String id,
+                                                    @RequestBody RoleSelection role) {
+        LoginResponse response = userService.selectRole(id, role);
+        return ResponseEntity.ok(response);
     }
 }
