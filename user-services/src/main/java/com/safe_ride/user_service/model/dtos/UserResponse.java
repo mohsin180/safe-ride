@@ -3,10 +3,6 @@ package com.safe_ride.user_service.model.dtos;
 import java.util.UUID;
 
 public record UserResponse(
-        UUID id,
-        String email,
-        String gender,
-        String role,
-        boolean enabled
+        UUID id
 ) {
 }
