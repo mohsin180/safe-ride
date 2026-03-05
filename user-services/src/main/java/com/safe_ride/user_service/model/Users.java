@@ -29,4 +29,6 @@ public class Users {
     private Gender gender;
     @Column(nullable = false)
     private boolean enabled = true;
+    @Column(nullable = false)
+    private boolean isEmailVerified = false;
 }

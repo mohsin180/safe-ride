@@ -24,15 +24,15 @@ public class UserService {
     private final AuthenticationManager authenticationManager;
     private final JwtUtil jwtUtil;
     private final PasswordEncoder passwordEncoder;
-    private final MailService mailService;
+    private final EmailVerificationService verificationService;
 
-    public UserService(UserRepository userRepository, UserMapper userMapper, AuthenticationManager authenticationManager, JwtUtil jwtUtil, PasswordEncoder passwordEncoder, MailService mailService) {
+    public UserService(UserRepository userRepository, UserMapper userMapper, AuthenticationManager authenticationManager, JwtUtil jwtUtil, PasswordEncoder passwordEncoder, EmailVerificationService verificationService) {
         this.userRepository = userRepository;
         this.userMapper = userMapper;
         this.authenticationManager = authenticationManager;
         this.jwtUtil = jwtUtil;
         this.passwordEncoder = passwordEncoder;
-        this.mailService = mailService;
+        this.verificationService = verificationService;
     }
 
     public UserResponse register(RegisterRequest request) {
@@ -43,6 +43,7 @@ public class UserService {
         Users user = userMapper.toUser(request);
         user.setPassword(passwordEncoder.encode(request.password()));
         userRepository.save(user);
+        verificationService.createAndSendVerification(user);
         return userMapper.toResponse(user);
     }
 
@@ -59,7 +60,13 @@ public class UserService {
                 .orElseThrow(() -> new UserNotFoundException("User Not Found"));
 
         if (!users.isEnabled()) {
-            throw new BadRequestException("Account is disabled");
+            throw new UserNotFoundException("Account is disabled");
+        }
+        if (!users.isEmailVerified()) {
+            throw new UserNotFoundException("Please verify your email before logging in");
+        }
+        if (users.getRole() == null) {
+            throw new UserNotFoundException("Please select a role before logging in");
         }
 
         String token = jwtUtil.generateToken(

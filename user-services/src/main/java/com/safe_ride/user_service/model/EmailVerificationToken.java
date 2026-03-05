@@ -1,6 +1,5 @@
-package com.safe_ride.user_service.model.dtos;
+package com.safe_ride.user_service.model;
 
-import com.safe_ride.user_service.model.Users;
 import jakarta.persistence.*;
 import lombok.AllArgsConstructor;
 import lombok.Builder;
@@ -32,4 +31,6 @@ public class EmailVerificationToken {
     @CreationTimestamp
     @Column(name = "created_at", nullable = false, updatable = false)
     private LocalDateTime createdAt;
+    @Column(name = "expires_at", nullable = false)
+    private LocalDateTime expiresAt;
 }
