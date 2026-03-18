@@ -23,21 +23,16 @@ public class DriverProfile {
 
     @Column(nullable = false, unique = true)
     private UUID userId;
-
     @Column(nullable = false)
     private String fullName;
-
     @Column(nullable = false)
-    private String vehicleModel;
-
+    private String cnic;
     @Column(nullable = false)
-    private String vehicleNumber;
+    private String phoneNo;
     @Column(nullable = false)
-    private String licenseNumber;
-
-    private String profilePicture;
-
-    private Double driverRating = 0.0;
+    private Double rating = 0.0;
+    @OneToOne(mappedBy = "driverProfile", cascade = CascadeType.ALL, orphanRemoval = true, fetch = FetchType.LAZY)
+    private Vehicle vehicle;
     @CreatedDate
     @Column(nullable = false)
     private LocalDateTime createdAt;

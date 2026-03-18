@@ -1,8 +1,8 @@
 spring:
   datasource:
     url: jdbc:postgresql://localhost:5432/profile_db
-    username: mohsin
-    password: secret
+    username: postgres
+    password: kgfpart2
     driver-class-name: org.postgresql.Driver
   jpa:
     hibernate:
@@ -10,5 +10,3 @@ spring:
     database-platform: org.hibernate.dialect.PostgreSQLDialect
 server:
   port: 8002
-file:
-  uploads-dir: uploads

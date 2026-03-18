@@ -6,7 +6,7 @@ public record PassengerProfileResponse(
         UUID id,
         String fullName,
         String cnic,
-        Role role,
+        String phoneNo,
         Double rating
 ) {
 }

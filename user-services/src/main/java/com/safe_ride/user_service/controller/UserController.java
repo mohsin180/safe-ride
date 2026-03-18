@@ -49,4 +49,10 @@ public class UserController {
         emailVerificationService.resendVerificationEmail(request.email());
         return ResponseEntity.ok().build();
     }
+
+    @GetMapping("/is-email-verified/{userId}")
+    public ResponseEntity<Boolean> isEmailVerified(@PathVariable String userId) {
+        boolean response = userService.isEmailVerified(userId);
+        return ResponseEntity.ok(response);
+    }
 }

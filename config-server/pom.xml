@@ -12,7 +12,7 @@
     <artifactId>config-server</artifactId>
     <version>0.0.1-SNAPSHOT</version>
     <name>config-server</name>
-    <description>config server for safe ride applicatiom</description>
+    <description>config server for safe ride application</description>
     <url/>
     <licenses>
         <license/>

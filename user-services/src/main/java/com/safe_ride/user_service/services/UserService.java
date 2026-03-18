@@ -92,4 +92,11 @@ public class UserService {
                 .token(token)
                 .build();
     }
+
+    public boolean isEmailVerified(String id) {
+        Users users = userRepository.findById(UUID.fromString(id)).orElseThrow(
+                () -> new UserNotFoundException("user not found")
+        );
+        return users.isEmailVerified();
+    }
 }

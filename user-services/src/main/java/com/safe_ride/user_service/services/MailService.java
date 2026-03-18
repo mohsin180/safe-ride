@@ -27,7 +27,7 @@ public class MailService {
 
         try {
             String verificationLink =
-                    verificationBaseUrl + "/api/v1/auth/verify-email?token=" + rawToken;
+                    verificationBaseUrl + "/verify-email?token=" + rawToken;
             String htmlBody = buildVerificationEmailBody(verificationLink);
             MimeMessage mailMessage = mailSender.createMimeMessage();
             MimeMessageHelper helper = new MimeMessageHelper(
