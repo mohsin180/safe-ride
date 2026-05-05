@@ -6,10 +6,7 @@ import com.saferide.profile_service.service.PassengerProfileService;
 import jakarta.validation.Valid;
 import org.springframework.http.ResponseEntity;
 import org.springframework.security.access.prepost.PreAuthorize;
-import org.springframework.web.bind.annotation.PostMapping;
-import org.springframework.web.bind.annotation.RequestBody;
-import org.springframework.web.bind.annotation.RequestMapping;
-import org.springframework.web.bind.annotation.RestController;
+import org.springframework.web.bind.annotation.*;
 
 @RestController
 @RequestMapping("/api/v1/profile")
@@ -27,6 +24,21 @@ public class PassengerProfileController {
             @Valid @RequestBody PassengerProfileRequest request
     ) {
         PassengerProfileResponse response = profileService.createPassengerProfile(request);
+        return ResponseEntity.ok(response);
+    }
+
+    @GetMapping
+    public ResponseEntity<PassengerProfileResponse> getMyProfile(@RequestHeader String userId) {
+        PassengerProfileResponse response = profileService.getMyProfile(userId);
+        return ResponseEntity.ok(response);
+    }
+
+    @PutMapping("/passenger")
+    @PreAuthorize("hasRole('PASSENGER')")
+    public ResponseEntity<PassengerProfileResponse> updatePassengerProfile(
+            @Valid @RequestBody PassengerProfileRequest request
+    ) {
+        PassengerProfileResponse response = profileService.updateMyProfile(request);
         return ResponseEntity.ok(response);
     }
 }

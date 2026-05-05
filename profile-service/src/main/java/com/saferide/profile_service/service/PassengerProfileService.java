@@ -2,6 +2,7 @@ package com.saferide.profile_service.service;
 
 import com.saferide.profile_service.config.UserContext;
 import com.saferide.profile_service.exceptions.ProfileAlreadyExistsException;
+import com.saferide.profile_service.exceptions.ProfileNotFoundException;
 import com.saferide.profile_service.exceptions.RoleNotAllowedException;
 import com.saferide.profile_service.models.dtos.PassengerProfileRequest;
 import com.saferide.profile_service.models.dtos.PassengerProfileResponse;
@@ -41,5 +42,26 @@ public class PassengerProfileService {
         Authentication authentication = SecurityContextHolder.getContext().getAuthentication();
         assert authentication != null;
         return (UserContext) authentication.getDetails();
+    }
+
+    public PassengerProfileResponse getMyProfile(String userId) {
+        UserContext ctx = getCurrentUserContext();
+        PassengerProfile profile = passengerProfileRepository
+                .findByUserId(ctx.userId());
+        return mapper.toResponse(profile);
+    }
+
+    public PassengerProfileResponse updateMyProfile(PassengerProfileRequest request) {
+        UserContext ctx = getCurrentUserContext();
+        if (!"PASSENGER".equals(ctx.role())) {
+            throw new RoleNotAllowedException("Only users with PASSENGER role can update a passenger profile");
+        }
+        PassengerProfile profile = passengerProfileRepository.findByUserId(ctx.userId());
+        if (profile == null) {
+            throw new ProfileNotFoundException("Passenger profile not found");
+        }
+        mapper.updatePassenger(request, profile);
+        PassengerProfile saved = passengerProfileRepository.save(profile);
+        return mapper.toResponse(saved);
     }
 }

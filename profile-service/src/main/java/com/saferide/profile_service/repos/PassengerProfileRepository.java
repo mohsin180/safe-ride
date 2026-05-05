@@ -9,4 +9,6 @@ import java.util.UUID;
 @Repository
 public interface PassengerProfileRepository extends JpaRepository<PassengerProfile, UUID> {
     boolean existsByUserId(UUID userId);
+
+    PassengerProfile findByUserId(UUID uuid);
 }

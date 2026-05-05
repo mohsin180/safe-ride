@@ -19,6 +19,10 @@ public class GatewayConfig {
                         .path("/api/v1/profile/**")
                         .uri("http://localhost:8002")
                 )
+                .route("rides-service", r -> r
+                        .path("/api/v1/rides/**")
+                        .uri("http://localhost:8003")
+                )
                 .build();
     }
 }

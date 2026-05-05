@@ -2,6 +2,7 @@ package com.saferide.profile_service.service;
 
 import com.saferide.profile_service.config.UserContext;
 import com.saferide.profile_service.exceptions.ProfileAlreadyExistsException;
+import com.saferide.profile_service.exceptions.ProfileNotFoundException;
 import com.saferide.profile_service.exceptions.RoleNotAllowedException;
 import com.saferide.profile_service.models.dtos.DriverProfileRequest;
 import com.saferide.profile_service.models.dtos.DriverProfileResponse;
@@ -52,4 +53,28 @@ public class DriverProfileService {
         return (UserContext) authentication.getDetails();
     }
 
+    public DriverProfileResponse getMyProfile() {
+        UserContext ctx = getCurrentUserContext();
+        DriverProfile profile = driverProfileRepository.findByUserId(ctx.userId());
+        if (profile == null) {
+            throw new ProfileNotFoundException("Driver profile not found");
+        }
+        return driverMapper.toDriverResponse(profile);
+    }
+
+    @Transactional
+    public DriverProfileResponse updateMyProfile(DriverProfileRequest request) {
+        UserContext ctx = getCurrentUserContext();
+        if (!"DRIVER".equals(ctx.role())) {
+            throw new RoleNotAllowedException("Only users with DRIVER role can update a driver profile");
+        }
+        DriverProfile profile = driverProfileRepository.findByUserId(ctx.userId());
+        if (profile == null) {
+            throw new ProfileNotFoundException("Driver profile not found");
+        }
+        driverMapper.updateDriver(request, profile);
+        vehicleMapper.updateVehicle(request.vehicle(), profile.getVehicle());
+        DriverProfile saved = driverProfileRepository.save(profile);
+        return driverMapper.toDriverResponse(saved);
+    }
 }
