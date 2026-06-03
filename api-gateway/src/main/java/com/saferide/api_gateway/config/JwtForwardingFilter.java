@@ -47,11 +47,13 @@ public class JwtForwardingFilter implements GlobalFilter, Ordered {
             String userId = claims.get("userId", String.class);
             String role = claims.get("role", String.class);
             String gender = claims.get("gender", String.class);
+            String email = claims.get("email", String.class);
 
             ServerHttpRequest mutatedRequest = request.mutate()
                     .header("X-User-Id", userId)
                     .header("X-User-Role", role)
                     .header("X-User-Gender", gender)
+                    .header("X-User-Email", email != null ? email : "")
                     .build();
             return chain.filter(exchange.mutate().request(mutatedRequest).build());
         } catch (Exception e) {

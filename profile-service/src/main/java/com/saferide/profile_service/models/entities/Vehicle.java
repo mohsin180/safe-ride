@@ -33,6 +33,9 @@ public class Vehicle {
     @Column(nullable = false)
     private int seats;
 
+    @Column(nullable = false)
+    private int year;
+
     @OneToOne(fetch = FetchType.LAZY)
     @JoinColumn(name = "driver_profile_id", nullable = false, unique = true)
     private DriverProfile driverProfile;

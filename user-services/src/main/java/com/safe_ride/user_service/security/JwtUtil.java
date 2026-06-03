@@ -18,13 +18,14 @@ public class JwtUtil {
     @Value("${jwt.expiration}")
     private long expiration;
 
-    public String generateToken(UUID userId, String role, String gender) {
+    public String generateToken(UUID userId, String role, String gender, String email) {
         return Jwts.builder()
                 .subject(userId.toString())
                 .claims(Map.of(
                         "userId", userId,
                         "role", role,
-                        "gender", gender
+                        "gender", gender,
+                        "email", email
                 )).issuedAt(new Date())
                 .expiration(new Date(System.currentTimeMillis() + expiration))
                 .signWith(getSigningKey())

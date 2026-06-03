@@ -15,6 +15,9 @@ public record VehicleRequest(
         @NotBlank(message = "Car color is required")
         String color,
         @NotNull(message = "Car Seats are required")
-        int seats
+        int seats,
+
+        @NotNull(message = "Car year is required")
+        int year
 ) {
 }

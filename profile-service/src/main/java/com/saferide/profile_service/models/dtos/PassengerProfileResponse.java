@@ -1,12 +1,17 @@
 package com.saferide.profile_service.models.dtos;
 
+import lombok.Data;
+
+import java.time.LocalDateTime;
 import java.util.UUID;
 
-public record PassengerProfileResponse(
-        UUID id,
-        String fullName,
-        String cnic,
-        String phoneNo,
-        Double rating
-) {
+@Data
+public class PassengerProfileResponse {
+    private UUID id;
+    private String fullName;
+    private String cnic;
+    private String phoneNo;
+    private String email;
+    private String gender;
+    private LocalDateTime createdAt;
 }

@@ -27,9 +27,10 @@ public class PassengerProfileController {
         return ResponseEntity.ok(response);
     }
 
-    @GetMapping
-    public ResponseEntity<PassengerProfileResponse> getMyProfile(@RequestHeader String userId) {
-        PassengerProfileResponse response = profileService.getMyProfile(userId);
+    @GetMapping("/passenger")
+    @PreAuthorize("hasRole('PASSENGER')")
+    public ResponseEntity<PassengerProfileResponse> getMyProfile() {
+        PassengerProfileResponse response = profileService.getMyProfile();
         return ResponseEntity.ok(response);
     }
 

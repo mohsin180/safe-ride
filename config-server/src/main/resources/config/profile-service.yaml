@@ -2,7 +2,7 @@ spring:
   datasource:
     url: jdbc:postgresql://localhost:5432/profile_db
     username: postgres
-    password: kgfpart2
+    password: kgf
     driver-class-name: org.postgresql.Driver
   jpa:
     hibernate:

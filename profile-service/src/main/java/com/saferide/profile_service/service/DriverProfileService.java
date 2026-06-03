@@ -56,10 +56,10 @@ public class DriverProfileService {
     public DriverProfileResponse getMyProfile() {
         UserContext ctx = getCurrentUserContext();
         DriverProfile profile = driverProfileRepository.findByUserId(ctx.userId());
-        if (profile == null) {
-            throw new ProfileNotFoundException("Driver profile not found");
-        }
-        return driverMapper.toDriverResponse(profile);
+        DriverProfileResponse response = driverMapper.toDriverResponse(profile);
+        response.setEmail(ctx.email());
+        response.setGender(ctx.gender());
+        return response;
     }
 
     @Transactional

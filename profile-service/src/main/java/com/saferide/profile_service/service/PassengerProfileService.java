@@ -44,11 +44,14 @@ public class PassengerProfileService {
         return (UserContext) authentication.getDetails();
     }
 
-    public PassengerProfileResponse getMyProfile(String userId) {
+    public PassengerProfileResponse getMyProfile() {
         UserContext ctx = getCurrentUserContext();
         PassengerProfile profile = passengerProfileRepository
                 .findByUserId(ctx.userId());
-        return mapper.toResponse(profile);
+        PassengerProfileResponse response = mapper.toResponse(profile);
+        response.setEmail(ctx.email());
+        response.setGender(ctx.gender());
+        return response;
     }
 
     public PassengerProfileResponse updateMyProfile(PassengerProfileRequest request) {

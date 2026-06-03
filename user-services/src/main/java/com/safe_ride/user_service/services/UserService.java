@@ -70,7 +70,7 @@ public class UserService {
         }
 
         String token = jwtUtil.generateToken(
-                users.getId(), users.getRole().name(), users.getGender().name());
+                users.getId(), users.getRole().name(), users.getGender().name(), users.getEmail());
 
         return LoginResponse.builder()
                 .token(token)
@@ -86,7 +86,8 @@ public class UserService {
         String token = jwtUtil.generateToken(
                 updatedUser.getId(),
                 updatedUser.getRole().name(),
-                updatedUser.getGender().name()
+                updatedUser.getGender().name(),
+                updatedUser.getEmail()
         );
         return LoginResponse.builder()
                 .token(token)

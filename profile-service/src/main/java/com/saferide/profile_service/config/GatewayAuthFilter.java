@@ -23,6 +23,7 @@ public class GatewayAuthFilter extends OncePerRequestFilter {
         String userId = request.getHeader("X-User-Id");
         String role = request.getHeader("X-User-Role");
         String gender = request.getHeader("X-User-Gender");
+        String email = request.getHeader("X-User-Email");
 
         if (userId != null && role != null && gender != null) {
             List<SimpleGrantedAuthority> grantedAuthority =
@@ -30,7 +31,7 @@ public class GatewayAuthFilter extends OncePerRequestFilter {
             UsernamePasswordAuthenticationToken authenticationToken =
                     new UsernamePasswordAuthenticationToken(
                             userId, null, grantedAuthority);
-            authenticationToken.setDetails(new UserContext(UUID.fromString(userId), role, gender));
+            authenticationToken.setDetails(new UserContext(UUID.fromString(userId), role, gender, email));
             SecurityContextHolder.getContext().setAuthentication(authenticationToken);
         }
         filterChain.doFilter(request, response);

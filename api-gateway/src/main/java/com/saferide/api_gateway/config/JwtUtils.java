@@ -44,6 +44,11 @@ public class JwtUtils {
         return claims.get("gender", String.class);
     }
 
+    public String extractEmail(String token) {
+        Claims claims = extractAllClaims(token);
+        return claims.get("email", String.class);
+    }
+
     public boolean isTokenExpired(String token) {
         return extractAllClaims(token).getExpiration().before(new Date());
     }

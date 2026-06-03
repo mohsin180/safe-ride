@@ -58,6 +58,7 @@ public class Ride {
     @CreationTimestamp
     @Column(nullable = false, updatable = false)
     private Instant createdAt;
+    private Instant cancelledAt;
     @Version
     private Long version;
 }
