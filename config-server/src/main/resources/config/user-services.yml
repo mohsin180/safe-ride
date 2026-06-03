@@ -1,8 +1,8 @@
 spring:
   datasource:
     url: jdbc:postgresql://localhost:5432/user_db
-    username: postgres
-    password: kgfpart2
+    username: safe-ride
+    password: kgf
   jpa:
     hibernate:
       ddl-auto: create   # options: validate, update, create, create-drop
