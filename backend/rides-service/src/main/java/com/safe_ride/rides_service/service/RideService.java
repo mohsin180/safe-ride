@@ -28,19 +28,26 @@ import java.time.ZoneOffset;
 import java.util.Comparator;
 import java.util.List;
 import java.util.UUID;
+import java.util.stream.Stream;
 
 @Service
 public class RideService {
+    /** Only rides whose pickup is within this many km of the rider are shown. */
+    private static final double SEARCH_RADIUS_KM = 5.0;
+
     private final RideRepository rideRepository;
     private final RideParticipantsRepository rideParticipantsRepository;
     private final RideMapper rideMapper;
+    private final PriceService priceService;
 
     public RideService(RideRepository rideRepository,
                        RideParticipantsRepository rideParticipantsRepository,
-                       RideMapper rideMapper) {
+                       RideMapper rideMapper,
+                       PriceService priceService) {
         this.rideRepository = rideRepository;
         this.rideParticipantsRepository = rideParticipantsRepository;
         this.rideMapper = rideMapper;
+        this.priceService = priceService;
     }
 
     public RideResponse createRide(CreateRideRequest request) {
@@ -142,11 +149,18 @@ public class RideService {
 
         List<Ride> rides = rideRepository.findAvailableRides(currentUserId);
 
-        List<AvailableRideResponse> response = rides.stream()
-                .map(r -> toAvailableRideResponse(r, lat, lng))
-                .toList();
+        Stream<AvailableRideResponse> response = rides.stream()
+                .map(r -> toAvailableRideResponse(r, lat, lng));
 
-        return response.stream()
+        // When the rider's location is known, only keep rides whose PICKUP is
+        // within SEARCH_RADIUS_KM. Without a location we can't measure distance,
+        // so fall back to returning all available rides.
+        if (lat != null && lng != null) {
+            response = response.filter(a -> a.getDistanceKm() != null
+                    && a.getDistanceKm() <= SEARCH_RADIUS_KM);
+        }
+
+        return response
                 .sorted(Comparator.comparing(
                         AvailableRideResponse::getDistanceKm,
                         Comparator.nullsLast(Comparator.naturalOrder())))
@@ -186,14 +200,14 @@ public class RideService {
         Double dropLng = r.getDestination() != null ? r.getDestination().getLongitude() : null;
 
         Double distanceKm = (lat != null && lng != null && pickupLat != null && pickupLng != null)
-                ? haversineKm(lat, lng, pickupLat, pickupLng)
+                ? priceService.distanceKm(lat, lng, pickupLat, pickupLng)
                 : null;
 
         Integer etaMinutes = distanceKm != null
                 ? (int) Math.round((distanceKm / 30.0) * 60)
                 : null;
 
-        Double fareForRider = computeRiderFare(r);
+        Double fareForRider = priceService.estimateRiderFare(r);
 
         return AvailableRideResponse.builder()
                 .id(r.getId().toString())
@@ -212,28 +226,6 @@ public class RideService {
                 .dropLng(dropLng)
                 .seatsAvailable(r.getAvailableSeats())
                 .build();
-    }
-
-    private Double computeRiderFare(Ride r) {
-        if (r.getPickup() == null || r.getDestination() == null) return null;
-        double tripKm = haversineKm(
-                r.getPickup().getLatitude(),
-                r.getPickup().getLongitude(),
-                r.getDestination().getLatitude(),
-                r.getDestination().getLongitude());
-        double total = 50.0 + tripKm * 20.0;
-        int seats = Math.max(r.getTotalSeats(), 1);
-        return Math.round((total / seats) * 100.0) / 100.0;
-    }
-
-    private static double haversineKm(double lat1, double lng1, double lat2, double lng2) {
-        final double R = 6371;
-        double dLat = Math.toRadians(lat2 - lat1);
-        double dLng = Math.toRadians(lng2 - lng1);
-        double a = Math.sin(dLat / 2) * Math.sin(dLat / 2)
-                + Math.cos(Math.toRadians(lat1)) * Math.cos(Math.toRadians(lat2))
-                * Math.sin(dLng / 2) * Math.sin(dLng / 2);
-        return 2 * R * Math.atan2(Math.sqrt(a), Math.sqrt(1 - a));
     }
 
     @Transactional(readOnly = true)
@@ -272,9 +264,11 @@ public class RideService {
         int seatsBooked = joined.size();
         int seatsAvailable = Math.max(0, ride.getTotalSeats() - seatsBooked);
 
-        RideDetailsResponse.FareDto fare = computeFare(ride, seatsBooked);
+        RideDetailsResponse.FareDto fare = priceService.computeFare(ride, seatsBooked);
 
-        boolean youHaveJoined = rideParticipantsRepository.existsByRide_IdAndUserId(rideId, viewerId);
+        // Derived from the participants we already loaded above — no extra query.
+        boolean youHaveJoined = joined.stream()
+                .anyMatch(p -> p.getUserId().equals(viewerId));
 
         Double pickupLat = ride.getPickup() != null ? ride.getPickup().getLatitude() : null;
         Double pickupLng = ride.getPickup() != null ? ride.getPickup().getLongitude() : null;
@@ -303,35 +297,6 @@ public class RideService {
                 .fare(fare)
                 .youHaveJoined(youHaveJoined)
                 .build();
-    }
-
-    private RideDetailsResponse.FareDto computeFare(Ride ride, int seatsBooked) {
-        if (ride.getPickup() == null || ride.getDestination() == null) {
-            return RideDetailsResponse.FareDto.builder()
-                    .baseFare(0.0)
-                    .sharedDiscount(0.0)
-                    .perRider(0.0)
-                    .currency("PKR")
-                    .build();
-        }
-        double tripKm = haversineKm(
-                ride.getPickup().getLatitude(),
-                ride.getPickup().getLongitude(),
-                ride.getDestination().getLatitude(),
-                ride.getDestination().getLongitude());
-        double base = round2(50.0 + tripKm * 20.0);
-        double discount = round2(seatsBooked > 1 ? base * 0.20 : 0.0);
-        double perRider = round2((base - discount) / Math.max(1, seatsBooked));
-        return RideDetailsResponse.FareDto.builder()
-                .baseFare(base)
-                .sharedDiscount(discount)
-                .perRider(perRider)
-                .currency("PKR")
-                .build();
-    }
-
-    private static double round2(double v) {
-        return Math.round(v * 100.0) / 100.0;
     }
 
     private static String displayName(UUID userId) {
