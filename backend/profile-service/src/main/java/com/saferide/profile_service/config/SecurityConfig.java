@@ -21,7 +21,13 @@ public class SecurityConfig {
     @Bean
     public SecurityFilterChain securityFilterChain(HttpSecurity security) {
         return security.csrf(AbstractHttpConfigurer::disable)
-                .authorizeHttpRequests(auth -> auth.anyRequest().authenticated())
+                .authorizeHttpRequests(auth -> auth
+                        // Service-to-service endpoints (e.g. rides-service Feign
+                        // calls) reach this service directly, without the
+                        // gateway's X-User-* headers, so they can't satisfy the
+                        // authenticated() rule below. They carry no client PII.
+                        .requestMatchers("/api/v1/profile/internal/**").permitAll()
+                        .anyRequest().authenticated())
                 .sessionManagement(session ->
                         session.sessionCreationPolicy(SessionCreationPolicy.STATELESS))
                 .addFilterBefore(gatewayAuth, UsernamePasswordAuthenticationFilter.class)

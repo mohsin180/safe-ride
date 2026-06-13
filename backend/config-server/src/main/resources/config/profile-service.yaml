@@ -1,12 +1,12 @@
 spring:
   datasource:
-    url: jdbc:postgresql://localhost:5432/profile_db
-    username: postgres
-    password: kgf
+    url: jdbc:postgresql://${DB_HOST:localhost}:${DB_PORT:5432}/${PROFILE_DB_NAME:profile_db}
+    username: ${DB_USERNAME:postgres}
+    password: ${DB_PASSWORD:kgf}
     driver-class-name: org.postgresql.Driver
   jpa:
     hibernate:
-      ddl-auto: update   # options: validate, update, create, create-drop
+      ddl-auto: ${JPA_DDL_AUTO:update}   # options: validate, update, create, create-drop
     database-platform: org.hibernate.dialect.PostgreSQLDialect
 server:
-  port: 8002
+  port: ${PROFILE_SERVER_PORT:8002}

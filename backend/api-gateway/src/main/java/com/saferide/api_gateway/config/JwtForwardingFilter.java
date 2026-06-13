@@ -31,6 +31,14 @@ public class JwtForwardingFilter implements GlobalFilter, Ordered {
         ServerHttpRequest request = exchange.getRequest();
         String path = request.getURI().getPath();
 
+        // Service-to-service endpoints (e.g. /api/v1/profile/internal/**) must
+        // only be reachable by other services calling each other directly —
+        // never from the public side through the gateway. Reject with 404 so
+        // the path's existence isn't revealed to clients.
+        if (isInternalPath(path)) {
+            return onNotFound(exchange);
+        }
+
         if (isPublicPath(path)) {
             return chain.filter(exchange);
         }
@@ -71,9 +79,21 @@ public class JwtForwardingFilter implements GlobalFilter, Ordered {
         return PUBLIC_PATHS.stream().anyMatch(path::startsWith);
     }
 
+    /** Matches any service's internal-only path segment, e.g.
+     *  {@code /api/v1/profile/internal/...}. */
+    public boolean isInternalPath(String path) {
+        return path.contains("/internal/") || path.endsWith("/internal");
+    }
+
     private Mono<Void> onUnauthorized(ServerWebExchange exchange) {
         ServerHttpResponse response = exchange.getResponse();
         response.setStatusCode(HttpStatus.UNAUTHORIZED);
+        return response.setComplete();
+    }
+
+    private Mono<Void> onNotFound(ServerWebExchange exchange) {
+        ServerHttpResponse response = exchange.getResponse();
+        response.setStatusCode(HttpStatus.NOT_FOUND);
         return response.setComplete();
     }
 }

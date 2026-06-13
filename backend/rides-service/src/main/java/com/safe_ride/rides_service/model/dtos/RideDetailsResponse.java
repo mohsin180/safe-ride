@@ -39,6 +39,7 @@ public class RideDetailsResponse {
         private String id;
         private String name;
         private Double rating;
+        private Integer ratingCount;
         private Integer trips;
         private String gender;
     }
@@ -51,6 +52,7 @@ public class RideDetailsResponse {
         private String id;
         private String name;
         private Double rating;
+        private Integer ratingCount;
         private Integer trips;
         private String gender;
     }

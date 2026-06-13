@@ -13,6 +13,7 @@ public class AvailableRideResponse {
     private String id;
     private String hostName;
     private Double hostRating;
+    private Integer hostRatingCount;
     private Integer hostTrips;
     private String hostGender;
     private Integer etaMinutes;
@@ -25,4 +26,6 @@ public class AvailableRideResponse {
     private Double dropLat;
     private Double dropLng;
     private Integer seatsAvailable;
+    /** On the "Your Rides" tab: true if you host this ride, false if you joined it. */
+    private Boolean youAreHost;
 }

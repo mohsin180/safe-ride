@@ -23,7 +23,12 @@ public class SecurityConfig {
     @Bean
     public SecurityFilterChain securityFilterChain(HttpSecurity http) throws Exception {
         return http.csrf(AbstractHttpConfigurer::disable)
-                .authorizeHttpRequests(auth -> auth.anyRequest().authenticated())
+                .authorizeHttpRequests(auth -> auth
+                        // Service-to-service endpoints (e.g. messaging-service
+                        // resolving ride members). The gateway blocks public
+                        // /internal/** so these stay reachable only in-cluster.
+                        .requestMatchers("/api/v1/rides/internal/**").permitAll()
+                        .anyRequest().authenticated())
                 .sessionManagement(session ->
                         session.sessionCreationPolicy(SessionCreationPolicy.STATELESS))
                 .addFilterBefore(gatewayAuth, UsernamePasswordAuthenticationFilter.class)

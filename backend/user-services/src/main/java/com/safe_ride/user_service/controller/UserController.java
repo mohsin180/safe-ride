@@ -2,6 +2,7 @@ package com.safe_ride.user_service.controller;
 
 import com.safe_ride.user_service.model.dtos.*;
 import com.safe_ride.user_service.services.EmailVerificationService;
+import com.safe_ride.user_service.services.PasswordResetService;
 import com.safe_ride.user_service.services.UserService;
 import jakarta.validation.Valid;
 import org.apache.coyote.BadRequestException;
@@ -14,10 +15,14 @@ import org.springframework.web.bind.annotation.*;
 public class UserController {
     private final UserService userService;
     private final EmailVerificationService emailVerificationService;
+    private final PasswordResetService passwordResetService;
 
-    public UserController(UserService userService, EmailVerificationService emailVerificationService) {
+    public UserController(UserService userService,
+                          EmailVerificationService emailVerificationService,
+                          PasswordResetService passwordResetService) {
         this.userService = userService;
         this.emailVerificationService = emailVerificationService;
+        this.passwordResetService = passwordResetService;
     }
 
     @PostMapping("/register")
@@ -91,5 +96,23 @@ public class UserController {
     public ResponseEntity<Boolean> isEmailVerified(@PathVariable String userId) {
         boolean response = userService.isEmailVerified(userId);
         return ResponseEntity.ok(response);
+    }
+
+    @PostMapping("/forgot-password")
+    public ResponseEntity<Void> forgotPassword(@Valid @RequestBody ForgotPasswordRequest request) {
+        // Always 200 — never reveal whether the email is registered.
+        passwordResetService.createAndSendResetLink(request.email());
+        return ResponseEntity.ok().build();
+    }
+
+    @GetMapping("/reset/status")
+    public ResponseEntity<Boolean> resetStatus(@RequestParam String token) {
+        return ResponseEntity.ok(passwordResetService.isResetTokenValid(token));
+    }
+
+    @PostMapping("/reset-password")
+    public ResponseEntity<Void> resetPassword(@Valid @RequestBody ResetPasswordRequest request) {
+        passwordResetService.resetPassword(request.token(), request.newPassword());
+        return ResponseEntity.ok().build();
     }
 }

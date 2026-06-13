@@ -1,0 +1,5 @@
+# Local environment files — never commit real secrets.
+# Track only .env.example as the documented template.
+.env
+.env.local
+.env.*.local

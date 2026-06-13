@@ -2,6 +2,7 @@ package com.safe_ride.rides_service.exceptions;
 
 import org.springframework.http.HttpStatus;
 import org.springframework.http.ResponseEntity;
+import org.springframework.orm.ObjectOptimisticLockingFailureException;
 import org.springframework.security.access.AccessDeniedException;
 import org.springframework.security.core.AuthenticationException;
 import org.springframework.web.bind.MethodArgumentNotValidException;
@@ -50,6 +51,14 @@ public class GlobalExceptionHandler {
     public ResponseEntity<ErrorResponse> handleConflict(ConflictException ex) {
         return ResponseEntity.status(HttpStatus.CONFLICT)
                 .body(new ErrorResponse(ex.getMessage()));
+    }
+
+    @ExceptionHandler(ObjectOptimisticLockingFailureException.class)
+    public ResponseEntity<ErrorResponse> handleOptimisticLock(ObjectOptimisticLockingFailureException ex) {
+        // Two drivers accepting the same ride at once: the second save loses
+        // the @Version check. Surface it as a clean conflict, not a 500.
+        return ResponseEntity.status(HttpStatus.CONFLICT)
+                .body(new ErrorResponse("This ride was just taken by another driver."));
     }
 
     @ExceptionHandler(AccessDeniedException.class)
