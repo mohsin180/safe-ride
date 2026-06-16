@@ -2,6 +2,8 @@ package com.safe_ride.rides_service.controller;
 
 import com.safe_ride.rides_service.model.dtos.AvailableRideResponse;
 import com.safe_ride.rides_service.model.dtos.CreateRideRequest;
+import com.safe_ride.rides_service.model.dtos.DriverEarningsResponse;
+import com.safe_ride.rides_service.model.dtos.DriverRideHistoryResponse;
 import com.safe_ride.rides_service.model.dtos.JoinRequestBody;
 import com.safe_ride.rides_service.model.dtos.PassengerRideHistoryResponse;
 import com.safe_ride.rides_service.model.dtos.RateDriverRequest;
@@ -126,8 +128,11 @@ public class RideController {
 
     @GetMapping("/driver/feed")
     @PreAuthorize("hasRole('DRIVER')")
-    public ResponseEntity<List<AvailableRideResponse>> getDriverFeed() {
-        return ResponseEntity.ok(rideService.getDriverFeed());
+    public ResponseEntity<List<AvailableRideResponse>> getDriverFeed(
+            @RequestParam(required = false) Double lat,
+            @RequestParam(required = false) Double lng
+    ) {
+        return ResponseEntity.ok(rideService.getDriverFeed(lat, lng));
     }
 
     @PostMapping("/{id}/accept")
@@ -160,6 +165,20 @@ public class RideController {
     @PreAuthorize("hasRole('DRIVER')")
     public ResponseEntity<List<RideDetailsResponse>> getDriverActiveRides() {
         return ResponseEntity.ok(rideService.getDriverActiveRides());
+    }
+
+    /** The driver's completed + cancelled rides for the ride-history screen. */
+    @GetMapping("/driver/history")
+    @PreAuthorize("hasRole('DRIVER')")
+    public ResponseEntity<List<DriverRideHistoryResponse>> getDriverHistory() {
+        return ResponseEntity.ok(rideService.getDriverHistory());
+    }
+
+    /** The driver's earnings summary — today's take plus lifetime totals. */
+    @GetMapping("/driver/earnings")
+    @PreAuthorize("hasRole('DRIVER')")
+    public ResponseEntity<DriverEarningsResponse> getDriverEarnings() {
+        return ResponseEntity.ok(rideService.getDriverEarnings());
     }
 
     // ── Ratings (post-trip, on a COMPLETED ride) ──────────────────

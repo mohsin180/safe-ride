@@ -1,0 +1,58 @@
+{
+  // Each service loads backend/.env automatically, so the VSCode Run/Debug
+  // (▶) button and the "Run | Debug" CodeLens above main() pick up the
+  // CloudAMQP / DB / JWT values WITHOUT dot-sourcing load-env.ps1 in a terminal.
+  // Start order still matters: run "config-server" first, then the rest.
+  "version": "0.2.0",
+  "configurations": [
+    {
+      "type": "java",
+      "name": "config-server",
+      "request": "launch",
+      "mainClass": "com.saferide.config_server.ConfigServerApplication",
+      "envFile": "${workspaceFolder}/backend/.env"
+    },
+    {
+      "type": "java",
+      "name": "api-gateway",
+      "request": "launch",
+      "mainClass": "com.saferide.api_gateway.ApiGatewayApplication",
+      "envFile": "${workspaceFolder}/backend/.env"
+    },
+    {
+      "type": "java",
+      "name": "user-services",
+      "request": "launch",
+      "mainClass": "com.safe_ride.user_service.UserServiceApplication",
+      "envFile": "${workspaceFolder}/backend/.env"
+    },
+    {
+      "type": "java",
+      "name": "profile-service",
+      "request": "launch",
+      "mainClass": "com.saferide.profile_service.ProfileServiceApplication",
+      "envFile": "${workspaceFolder}/backend/.env"
+    },
+    {
+      "type": "java",
+      "name": "rides-service",
+      "request": "launch",
+      "mainClass": "com.safe_ride.rides_service.RidesServiceApplication",
+      "envFile": "${workspaceFolder}/backend/.env"
+    },
+    {
+      "type": "java",
+      "name": "notification-service",
+      "request": "launch",
+      "mainClass": "com.saferide.notification_service.NotificationServiceApplication",
+      "envFile": "${workspaceFolder}/backend/.env"
+    },
+    {
+      "type": "java",
+      "name": "messaging-service",
+      "request": "launch",
+      "mainClass": "com.saferide.messaging_service.MessagingServiceApplication",
+      "envFile": "${workspaceFolder}/backend/.env"
+    }
+  ]
+}

@@ -86,7 +86,8 @@ public class InternalProfileController {
 
     private DriverSummaryResponse toDriverSummary(DriverProfile d) {
         return new DriverSummaryResponse(
-                d.getUserId(), d.getFullName(), composeCarInfo(d.getVehicle()), d.getRating());
+                d.getUserId(), d.getFullName(), composeCarInfo(d.getVehicle()),
+                d.getRating(), d.getPhoneNo());
     }
 
     /**

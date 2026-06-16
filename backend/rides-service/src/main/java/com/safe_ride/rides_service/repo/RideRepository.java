@@ -1,5 +1,6 @@
 package com.safe_ride.rides_service.repo;
 
+import com.safe_ride.rides_service.model.entity.Gender;
 import com.safe_ride.rides_service.model.entity.Ride;
 import com.safe_ride.rides_service.model.entity.RideStatus;
 import org.springframework.data.jpa.repository.JpaRepository;
@@ -21,13 +22,37 @@ public interface RideRepository extends JpaRepository<Ride, UUID> {
     long countByDriverIdAndStatus(UUID driverId, RideStatus status);
 
     @Query("SELECT r FROM Ride r " +
-            "WHERE r.status IN (com.safe_ride.rides_service.model.entity.RideStatus.PENDING, " +
-            "                   com.safe_ride.rides_service.model.entity.RideStatus.ACCEPTED) " +
+            "WHERE r.status = com.safe_ride.rides_service.model.entity.RideStatus.PENDING " +
             "AND r.createdByUserId <> :currentUserId " +
+            "AND r.gender = :gender " +
             "AND r.availableSeats > 0 " +
             "AND r.id NOT IN (SELECT p.ride.id FROM RideParticipants p WHERE p.userId = :currentUserId) " +
             "ORDER BY r.createdAt DESC")
-    List<Ride> findAvailableRides(@Param("currentUserId") UUID currentUserId);
+    List<Ride> findAvailableRides(@Param("currentUserId") UUID currentUserId,
+                                  @Param("gender") Gender gender);
+
+    /**
+     * Same as {@link #findAvailableRides} but spatially bounded: only rides
+     * whose pickup is within {@code radiusMeters} of the rider, ordered
+     * nearest-first. Backed by the PostGIS GiST index on {@code pickup_geog}
+     * — {@code ST_DWithin} for the radius, the {@code <->} KNN operator for the
+     * order. Native because these are PostGIS operators JPQL can't express;
+     * gender is bound as its String name (the column stores the enum name).
+     */
+    @Query(value = "SELECT r.* FROM ride r "
+            + "WHERE r.status = 'PENDING' "
+            + "AND r.created_by_user_id <> :uid "
+            + "AND r.gender = :gender "
+            + "AND r.available_seats > 0 "
+            + "AND r.id NOT IN (SELECT p.ride_id FROM ride_participants p WHERE p.user_id = :uid) "
+            + "AND ST_DWithin(r.pickup_geog, ST_SetSRID(ST_MakePoint(:lng, :lat), 4326)::geography, :radiusMeters) "
+            + "ORDER BY r.pickup_geog <-> ST_SetSRID(ST_MakePoint(:lng, :lat), 4326)::geography",
+            nativeQuery = true)
+    List<Ride> findAvailableRidesNearby(@Param("uid") UUID uid,
+                                        @Param("gender") String gender,
+                                        @Param("lat") double lat,
+                                        @Param("lng") double lng,
+                                        @Param("radiusMeters") double radiusMeters);
 
     @Query("SELECT r FROM Ride r " +
             "WHERE r.createdByUserId = :userId " +
@@ -67,6 +92,27 @@ public interface RideRepository extends JpaRepository<Ride, UUID> {
     List<Ride> findMyRideHistory(@Param("userId") UUID userId);
 
     /**
+     * The driver's finished rides — COMPLETED or CANCELLED — that they were
+     * assigned to. Drives the driver ride-history screen, newest-first.
+     */
+    @Query("SELECT r FROM Ride r " +
+            "WHERE r.driverId = :driverId " +
+            "AND r.status IN (com.safe_ride.rides_service.model.entity.RideStatus.COMPLETED, " +
+            "                 com.safe_ride.rides_service.model.entity.RideStatus.CANCELLED) " +
+            "ORDER BY r.createdAt DESC")
+    List<Ride> findDriverRideHistory(@Param("driverId") UUID driverId);
+
+    /**
+     * The driver's COMPLETED rides — drives the earnings totals (lifetime +
+     * today). Newest-first, though order doesn't affect the aggregates.
+     */
+    @Query("SELECT r FROM Ride r " +
+            "WHERE r.driverId = :driverId " +
+            "AND r.status = com.safe_ride.rides_service.model.entity.RideStatus.COMPLETED " +
+            "ORDER BY r.createdAt DESC")
+    List<Ride> findDriverCompletedRides(@Param("driverId") UUID driverId);
+
+    /**
      * Fresh ride requests a driver can claim: still PENDING (no driver yet)
      * and with seats left. Drivers aren't participants, so unlike the
      * passenger feed there's no participant sub-query or creator filter.
@@ -76,6 +122,22 @@ public interface RideRepository extends JpaRepository<Ride, UUID> {
             "AND r.availableSeats > 0 " +
             "ORDER BY r.createdAt DESC")
     List<Ride> findDriverFeed();
+
+    /**
+     * Same as {@link #findDriverFeed} but spatially bounded to PENDING rides
+     * within {@code radiusMeters} of the driver, ordered nearest-first via the
+     * PostGIS GiST index on {@code pickup_geog}. No gender filter — drivers
+     * aren't gender-restricted. Native for the PostGIS operators.
+     */
+    @Query(value = "SELECT r.* FROM ride r "
+            + "WHERE r.status = 'PENDING' "
+            + "AND r.available_seats > 0 "
+            + "AND ST_DWithin(r.pickup_geog, ST_SetSRID(ST_MakePoint(:lng, :lat), 4326)::geography, :radiusMeters) "
+            + "ORDER BY r.pickup_geog <-> ST_SetSRID(ST_MakePoint(:lng, :lat), 4326)::geography",
+            nativeQuery = true)
+    List<Ride> findDriverFeedNearby(@Param("lat") double lat,
+                                    @Param("lng") double lng,
+                                    @Param("radiusMeters") double radiusMeters);
 
     /**
      * The ride(s) a driver is currently running — ACCEPTED (en route to

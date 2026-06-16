@@ -8,10 +8,16 @@
 # Then start a service from the SAME shell:
 #     cd user-services ; .\mvnw.cmd spring-boot:run
 
-param([string]$Path = ".env")
+param([string]$Path)
+
+# Default to ".env" sitting next to this script (backend\.env), so it works
+# no matter which service folder you dot-source it from.
+if (-not $Path) { $Path = Join-Path $PSScriptRoot ".env" }
+elseif (-not [System.IO.Path]::IsPathRooted($Path)) { $Path = Join-Path $PSScriptRoot $Path }
 
 if (-not (Test-Path $Path)) {
-    Write-Host "No env file at '$Path'. Copy .env.example to .env first." -ForegroundColor Yellow
+    Write-Host "No env file at '$Path'." -ForegroundColor Yellow
+    Write-Host "Create it first:  Copy-Item '$PSScriptRoot\.env.example' '$PSScriptRoot\.env'" -ForegroundColor Yellow
     return
 }
 

@@ -56,6 +56,9 @@ public class DriverProfileService {
     public DriverProfileResponse getMyProfile() {
         UserContext ctx = getCurrentUserContext();
         DriverProfile profile = driverProfileRepository.findByUserId(ctx.userId());
+        if (profile == null) {
+            throw new ProfileNotFoundException("Profile not found — complete onboarding first");
+        }
         DriverProfileResponse response = driverMapper.toDriverResponse(profile);
         response.setEmail(ctx.email());
         response.setGender(ctx.gender());

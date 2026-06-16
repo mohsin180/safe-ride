@@ -30,6 +30,10 @@ public class RideDetailsResponse {
     private List<CoPassengerDto> coPassengers;
     private FareDto fare;
     private Boolean youHaveJoined;
+    /** The assigned driver, once one accepts the ride; null while PENDING
+     *  or if the driver profile can't be resolved. Powers the passenger
+     *  active-trip driver card. */
+    private DriverDto driver;
 
     @Data
     @Builder
@@ -66,5 +70,17 @@ public class RideDetailsResponse {
         private Double sharedDiscount;
         private Double perRider;
         private String currency;
+    }
+
+    @Data
+    @Builder
+    @NoArgsConstructor
+    @AllArgsConstructor
+    public static class DriverDto {
+        private String id;
+        private String name;
+        private String carInfo;
+        private Double rating;
+        private String phone;
     }
 }

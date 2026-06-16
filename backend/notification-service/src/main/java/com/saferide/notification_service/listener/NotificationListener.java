@@ -87,10 +87,6 @@ public class NotificationListener {
             case "DRIVER_CANCELLED" -> new Content("TRIP", "Driver unavailable",
                     "Your driver dropped the ride to " + drop
                             + " — we're finding you another driver.");
-            case "RIDE_JOINED" -> new Content("REQUEST", "New passenger",
-                    "Someone joined the ride to " + drop + ".");
-            case "RIDE_LEFT" -> new Content("REQUEST", "Passenger left",
-                    "A passenger left the ride to " + drop + ".");
             case "RATING_RECEIVED" -> new Content("RATING", "New rating",
                     e.stars() != null
                             ? "You received a " + e.stars() + "-star rating."

@@ -48,6 +48,9 @@ public class PassengerProfileService {
         UserContext ctx = getCurrentUserContext();
         PassengerProfile profile = passengerProfileRepository
                 .findByUserId(ctx.userId());
+        if (profile == null) {
+            throw new ProfileNotFoundException("Profile not found — complete onboarding first");
+        }
         PassengerProfileResponse response = mapper.toResponse(profile);
         response.setEmail(ctx.email());
         response.setGender(ctx.gender());

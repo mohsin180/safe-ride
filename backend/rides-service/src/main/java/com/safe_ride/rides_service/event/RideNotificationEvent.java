@@ -34,8 +34,6 @@ public record RideNotificationEvent(
     public static final String RIDE_CANCELLED = "RIDE_CANCELLED";
     /** The assigned driver dropped the ride; it's re-opened for another driver. */
     public static final String DRIVER_CANCELLED = "DRIVER_CANCELLED";
-    public static final String RIDE_JOINED = "RIDE_JOINED";
-    public static final String RIDE_LEFT = "RIDE_LEFT";
     public static final String RATING_RECEIVED = "RATING_RECEIVED";
     /** A co-passenger left at their stop — remaining riders are prompted to rate them. */
     public static final String RATE_PROMPT = "RATE_PROMPT";

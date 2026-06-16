@@ -57,6 +57,12 @@ public class JwtForwardingFilter implements GlobalFilter, Ordered {
             String gender = claims.get("gender", String.class);
             String email = claims.get("email", String.class);
 
+            // A token missing any required claim is invalid; never forward null
+            // identity headers downstream.
+            if (userId == null || role == null || gender == null) {
+                return onUnauthorized(exchange);
+            }
+
             ServerHttpRequest mutatedRequest = request.mutate()
                     .header("X-User-Id", userId)
                     .header("X-User-Role", role)

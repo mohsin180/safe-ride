@@ -1,9 +1,12 @@
 spring:
   datasource:
-    url: jdbc:postgresql://${DB_HOST:localhost}:${DB_PORT:5432}/${RIDES_DB_NAME:ride_db}
+    url: jdbc:postgresql://${DB_HOST:localhost}:${DB_PORT:5432}/${RIDES_DB_NAME:ride_db}${DB_PARAMS:}
     username: ${DB_USERNAME:postgres}
     password: ${DB_PASSWORD:kgf}
     driver-class-name: org.postgresql.Driver
+    hikari:
+      maximum-pool-size: ${DB_POOL_SIZE:5}
+      minimum-idle: ${DB_MIN_IDLE:1}
   jpa:
     hibernate:
       ddl-auto: ${JPA_DDL_AUTO:update}
@@ -13,6 +16,10 @@ spring:
     port: ${RABBITMQ_PORT:5672}
     username: ${RABBITMQ_USERNAME:guest}
     password: ${RABBITMQ_PASSWORD:guest}
+    # CloudAMQP: vhost == username (the instance id), and use TLS on port 5671.
+    virtual-host: ${RABBITMQ_VHOST:/}
+    ssl:
+      enabled: ${RABBITMQ_SSL:false}
 server:
   port: ${RIDES_SERVER_PORT:8003}
 
@@ -21,3 +28,21 @@ server:
 profile:
   service:
     url: ${PROFILE_SERVICE_URL:http://localhost:8002}
+
+# Fare-pricing model (server-authoritative). All env-var-backed; the defaults
+# here also seed PriceService's PricingProperties bean.
+pricing:
+  base-fare: ${PRICE_BASE_FARE:50}
+  per-km: ${PRICE_PER_KM:20}
+  per-min: ${PRICE_PER_MIN:2}
+  shared-discount-rate: ${PRICE_SHARED_DISCOUNT:0.20}
+  premium-multiplier: ${PRICE_PREMIUM_MULTIPLIER:1.5}
+  min-fare: ${PRICE_MIN_FARE:80}
+  currency: ${PRICE_CURRENCY:PKR}
+
+# Geoapify routing — used server-side to resolve a trip's road distance/time at
+# ride creation. With no key, pricing falls back to Haversine (the app still
+# runs, just less accurate).
+geoapify:
+  api-key: ${GEOAPIFY_KEY:}
+  routing-url: ${GEOAPIFY_ROUTING_URL:https://api.geoapify.com/v1/routing}

@@ -30,8 +30,8 @@ public record CreateRideRequest(
         @DecimalMax(value = "180.0", message = "must be between -180 and 180")
         Double dropLng,
 
-        @Min(value = 1, message = "must be between 1 and 6")
-        @Max(value = 6, message = "must be between 1 and 6")
+        @Min(value = 1, message = "must be between 1 and 4")
+        @Max(value = 4, message = "must be between 1 and 4")
         int seats,
 
         @NotNull(message = "is required (ECONOMY or PREMIUM)")

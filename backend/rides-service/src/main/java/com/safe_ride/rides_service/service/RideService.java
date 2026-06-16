@@ -4,6 +4,8 @@ import com.safe_ride.rides_service.client.DriverClient;
 import com.safe_ride.rides_service.client.DriverSummary;
 import com.safe_ride.rides_service.client.PassengerSummary;
 import com.safe_ride.rides_service.client.ProfileClient;
+import com.safe_ride.rides_service.client.RouteResult;
+import com.safe_ride.rides_service.client.RoutingClient;
 import com.safe_ride.rides_service.config.UserContext;
 import com.safe_ride.rides_service.event.NotificationPublisher;
 import com.safe_ride.rides_service.event.RideNotificationEvent;
@@ -13,6 +15,8 @@ import com.safe_ride.rides_service.exceptions.NotFoundException;
 import com.safe_ride.rides_service.exceptions.RoleNotAllowedException;
 import com.safe_ride.rides_service.model.dtos.AvailableRideResponse;
 import com.safe_ride.rides_service.model.dtos.CreateRideRequest;
+import com.safe_ride.rides_service.model.dtos.DriverEarningsResponse;
+import com.safe_ride.rides_service.model.dtos.DriverRideHistoryResponse;
 import com.safe_ride.rides_service.model.dtos.JoinRequestBody;
 import com.safe_ride.rides_service.model.dtos.PassengerRideHistoryResponse;
 import com.safe_ride.rides_service.model.dtos.RideDetailsResponse;
@@ -39,22 +43,23 @@ import org.springframework.stereotype.Service;
 import org.springframework.transaction.annotation.Transactional;
 
 import java.time.Instant;
+import java.time.LocalDate;
 import java.time.OffsetDateTime;
 import java.time.ZoneOffset;
 import java.util.ArrayList;
 import java.util.Collection;
-import java.util.Comparator;
 import java.util.List;
 import java.util.Map;
 import java.util.Objects;
 import java.util.UUID;
 import java.util.stream.Collectors;
-import java.util.stream.Stream;
 
 @Service
 public class RideService {
     /** Only rides whose pickup is within this many km of the rider are shown. */
     private static final double SEARCH_RADIUS_KM = 5.0;
+    /** Drivers cover more ground, so their feed uses a wider catchment. */
+    private static final double DRIVER_SEARCH_RADIUS_KM = 10.0;
 
     private final RideRepository rideRepository;
     private final RideParticipantsRepository rideParticipantsRepository;
@@ -65,6 +70,7 @@ public class RideService {
     private final PriceService priceService;
     private final ProfileClient profileClient;
     private final DriverClient driverClient;
+    private final RoutingClient routingClient;
     private final NotificationPublisher notificationPublisher;
 
     public RideService(RideRepository rideRepository,
@@ -76,6 +82,7 @@ public class RideService {
                        PriceService priceService,
                        ProfileClient profileClient,
                        DriverClient driverClient,
+                       RoutingClient routingClient,
                        NotificationPublisher notificationPublisher) {
         this.rideRepository = rideRepository;
         this.rideParticipantsRepository = rideParticipantsRepository;
@@ -86,6 +93,7 @@ public class RideService {
         this.priceService = priceService;
         this.profileClient = profileClient;
         this.driverClient = driverClient;
+        this.routingClient = routingClient;
         this.notificationPublisher = notificationPublisher;
     }
 
@@ -115,11 +123,47 @@ public class RideService {
         ride.setGender(Gender.valueOf(ctx.gender()));
         ride.setStatus(RideStatus.PENDING);
 
+        // Resolve & persist the trip's road distance/duration so pricing is
+        // server-authoritative and stable. Prefer the Geoapify routing API;
+        // if it's unavailable (no key / network / parse error) fall back to a
+        // Haversine straight-line distance and a 30 km/h duration estimate, so
+        // every ride still gets a stored distance + duration.
+        stampRouteDistance(ride);
+
         Ride saved = rideRepository.save(ride);
         // Confirmation to the creator that their request is posted.
         notificationPublisher.publish(
                 RideNotificationEvent.RIDE_CREATED, saved, List.of(saved.getCreatedByUserId()));
         return rideMapper.toResponse(saved);
+    }
+
+    /**
+     * Sets {@code routeDistanceKm} / {@code routeDurationMin} on the ride from
+     * the routing API, falling back to Haversine (distance) and a 30 km/h
+     * estimate (duration) when routing returns nothing or the coords are
+     * missing. Never throws — a routing failure must not block ride creation.
+     */
+    private void stampRouteDistance(Ride ride) {
+        if (ride.getPickup() == null || ride.getDestination() == null) {
+            return;
+        }
+        double pickupLat = ride.getPickup().getLatitude();
+        double pickupLng = ride.getPickup().getLongitude();
+        double dropLat = ride.getDestination().getLatitude();
+        double dropLng = ride.getDestination().getLongitude();
+
+        RouteResult route = routingClient
+                .route(pickupLat, pickupLng, dropLat, dropLng)
+                .orElse(null);
+
+        if (route != null) {
+            ride.setRouteDistanceKm(route.distanceKm());
+            ride.setRouteDurationMin(route.durationMin());
+        } else {
+            double haversineKm = priceService.distanceKm(pickupLat, pickupLng, dropLat, dropLng);
+            ride.setRouteDistanceKm(haversineKm);
+            ride.setRouteDurationMin((int) Math.round((haversineKm / 30.0) * 60));
+        }
     }
 
     @Transactional
@@ -204,9 +248,17 @@ public class RideService {
         if (ride.getCreatedByUserId().equals(userId)) {
             throw new ForbiddenException("Hosts can't join their own ride");
         }
-        if (ride.getStatus() != RideStatus.PENDING
-                && ride.getStatus() != RideStatus.ACCEPTED) {
-            throw new ConflictException("Ride is " + ride.getStatus());
+        if (ride.getStatus() != RideStatus.PENDING) {
+            throw new ConflictException(
+                    "Ride is " + ride.getStatus() + " and can no longer be joined");
+        }
+        // Gender-specific matching, enforced server-side: the feed hides
+        // opposite-gender rides, but a client could still POST a join with
+        // any rideId, so reject a mismatch here too.
+        if (ride.getGender() != null && parseGender(ctx.gender()) != ride.getGender()) {
+            throw new ForbiddenException(
+                    "This ride is for " + ride.getGender().name().toLowerCase()
+                            + " passengers only.");
         }
         if (rideParticipantsRepository.existsByRide_IdAndUserId(rideId, userId)) {
             throw new ConflictException("You've already joined this ride");
@@ -381,28 +433,32 @@ public class RideService {
             return List.of();
         }
 
-        List<Ride> rides = rideRepository.findAvailableRides(currentUserId);
+        // Gender-specific matching: a passenger only sees rides hosted by
+        // someone of their own gender. If we can't determine the rider's
+        // gender we show nothing rather than risk a cross-gender match.
+        Gender riderGender = parseGender(ctx.gender());
+        if (riderGender == null) {
+            return List.of();
+        }
+
+        // With a location, PostGIS does the radius filter AND the nearest-first
+        // ordering in one indexed query (ST_DWithin + the <-> KNN operator).
+        // Without a location we can't measure distance, so fall back to the
+        // non-spatial list (newest-first).
+        List<Ride> rides = (lat != null && lng != null)
+                ? rideRepository.findAvailableRidesNearby(
+                        currentUserId, riderGender.name(), lat, lng, SEARCH_RADIUS_KM * 1000)
+                : rideRepository.findAvailableRides(currentUserId, riderGender);
 
         // Resolve all host names in a single call to profile-service rather
         // than one round-trip per ride.
         Map<UUID, PassengerSummary> hosts = fetchPassengerSummaries(
                 rides.stream().map(Ride::getCreatedByUserId).toList());
 
-        Stream<AvailableRideResponse> response = rides.stream()
-                .map(r -> toAvailableRideResponse(r, lat, lng, hosts));
-
-        // When the rider's location is known, only keep rides whose PICKUP is
-        // within SEARCH_RADIUS_KM. Without a location we can't measure distance,
-        // so fall back to returning all available rides.
-        if (lat != null && lng != null) {
-            response = response.filter(a -> a.getDistanceKm() != null
-                    && a.getDistanceKm() <= SEARCH_RADIUS_KM);
-        }
-
-        return response
-                .sorted(Comparator.comparing(
-                        AvailableRideResponse::getDistanceKm,
-                        Comparator.nullsLast(Comparator.naturalOrder())))
+        // The DB already returned them nearest-first; preserve that order and
+        // just attach each ride's distance/fare for display.
+        return rides.stream()
+                .map(r -> toAvailableRideResponse(r, lat, lng, hosts))
                 .toList();
     }
 
@@ -443,19 +499,24 @@ public class RideService {
     // ── Driver ride-lifecycle ──────────────────────────────────────
 
     /**
-     * Fresh ride requests a driver can claim. Reuses the same host-resolution
-     * + fare mapping as the passenger feed, with no location filtering
-     * (lat/lng null) so distanceKm / etaMinutes come back null.
+     * Fresh ride requests a driver can claim. With the driver's location,
+     * PostGIS bounds the feed to nearby PENDING rides (within
+     * {@code DRIVER_SEARCH_RADIUS_KM}), ordered nearest-first and stamped with
+     * a distance; without it, falls back to the full pending feed. Reuses the
+     * same host-resolution + fare mapping as the passenger feed.
      */
-    public List<AvailableRideResponse> getDriverFeed() {
+    public List<AvailableRideResponse> getDriverFeed(Double lat, Double lng) {
         requireDriver();
-        List<Ride> rides = rideRepository.findDriverFeed();
+        List<Ride> rides = (lat != null && lng != null)
+                ? rideRepository.findDriverFeedNearby(lat, lng, DRIVER_SEARCH_RADIUS_KM * 1000)
+                : rideRepository.findDriverFeed();
 
         Map<UUID, PassengerSummary> hosts = fetchPassengerSummaries(
                 rides.stream().map(Ride::getCreatedByUserId).toList());
 
+        // Preserve the DB's nearest-first order; attach distance/fare for display.
         return rides.stream()
-                .map(r -> toAvailableRideResponse(r, null, null, hosts))
+                .map(r -> toAvailableRideResponse(r, lat, lng, hosts))
                 .toList();
     }
 
@@ -510,6 +571,7 @@ public class RideService {
                     "Ride is " + ride.getStatus() + " and cannot be completed");
         }
         ride.setStatus(RideStatus.COMPLETED);
+        ride.setCompletedAt(Instant.now());
         Ride saved = rideRepository.save(ride);
         // Host + co-passengers + the driver.
         List<UUID> recipients = hostAndParticipants(saved);
@@ -663,6 +725,31 @@ public class RideService {
                 ? ride.getCreatedAt().atOffset(ZoneOffset.UTC)
                 : null;
 
+        // Once a driver has accepted, resolve their profile (name + car +
+        // rating + phone) so the passenger active-trip card can show who's
+        // driving. Stays null while the ride is still PENDING, or if the
+        // driver profile can't be resolved.
+        RideDetailsResponse.DriverDto driver = null;
+        if (ride.getDriverId() != null) {
+            UUID driverId = ride.getDriverId();
+            DriverSummary ds = fetchDriverSummaries(List.of(driverId)).get(driverId);
+            if (ds != null) {
+                driver = RideDetailsResponse.DriverDto.builder()
+                        .id(driverId.toString())
+                        .name(ds.fullName())
+                        .carInfo(ds.carInfo())
+                        .rating(ds.rating() != null && ds.rating() > 0.0 ? ds.rating() : null)
+                        .phone(ds.phone())
+                        .build();
+            } else {
+                // Profile unreachable — still surface the driver id so the UI
+                // knows one is assigned, without fabricating other fields.
+                driver = RideDetailsResponse.DriverDto.builder()
+                        .id(driverId.toString())
+                        .build();
+            }
+        }
+
         return RideDetailsResponse.builder()
                 .id(ride.getId().toString())
                 .pickup(ride.getPickup() != null ? ride.getPickup().getAddress() : null)
@@ -680,6 +767,7 @@ public class RideService {
                 .coPassengers(coPassengers)
                 .fare(fare)
                 .youHaveJoined(youHaveJoined)
+                .driver(driver)
                 .build();
     }
 
@@ -818,6 +906,96 @@ public class RideService {
         }
     }
 
+    // ── Driver history + earnings ─────────────────────────────────
+
+    /**
+     * The driver's finished rides (COMPLETED + CANCELLED), newest-first, for
+     * the driver ride-history screen. Mirrors {@link #getMyHistory} /
+     * {@link #toHistoryItem}: one batch call resolves every host name, and each
+     * ride is mapped to a {@link DriverRideHistoryResponse}. Driver-gated via
+     * the controller's {@code @PreAuthorize}.
+     */
+    public List<DriverRideHistoryResponse> getDriverHistory() {
+        UserContext ctx = requireDriver();
+        List<Ride> rides = rideRepository.findDriverRideHistory(ctx.userId());
+
+        // Resolve every host (the passenger who created the ride) in one call.
+        Map<UUID, PassengerSummary> hosts = fetchPassengerSummaries(
+                rides.stream().map(Ride::getCreatedByUserId).toList());
+
+        return rides.stream()
+                .map(r -> toDriverHistoryItem(r, hosts))
+                .toList();
+    }
+
+    private DriverRideHistoryResponse toDriverHistoryItem(Ride r,
+                                                          Map<UUID, PassengerSummary> hosts) {
+        // Completed rides carry a completedAt; cancelled rides a cancelledAt.
+        // Fall back to createdAt for rides finished before those fields existed.
+        Instant ts;
+        if (r.getStatus() == RideStatus.COMPLETED && r.getCompletedAt() != null) {
+            ts = r.getCompletedAt();
+        } else if (r.getStatus() == RideStatus.CANCELLED && r.getCancelledAt() != null) {
+            ts = r.getCancelledAt();
+        } else {
+            ts = r.getCreatedAt();
+        }
+        OffsetDateTime completedAt = ts != null ? ts.atOffset(ZoneOffset.UTC) : null;
+
+        // The driver's gross for the trip (un-split total). Cancelled rides
+        // still report their would-be fare; the frontend shows PKR 0 for
+        // cancelled rows itself, but we keep the value honest here.
+        Double fare = r.getStatus() == RideStatus.COMPLETED ? priceService.tripFare(r) : 0.0;
+
+        return DriverRideHistoryResponse.builder()
+                .id(r.getId().toString())
+                .pickup(r.getPickup() != null ? r.getPickup().getAddress() : null)
+                .drop(r.getDestination() != null ? r.getDestination().getAddress() : null)
+                .status(r.getStatus() != null ? r.getStatus().name() : null)
+                .completedAt(completedAt)
+                .fare(fare)
+                .passengerName(resolveName(hosts, r.getCreatedByUserId()))
+                .build();
+    }
+
+    /**
+     * Driver earnings summary — lifetime totals plus today's. Computed over the
+     * driver's COMPLETED rides: {@code tripFare} summed for the lifetime total,
+     * and the same restricted to rides whose {@code completedAt} falls on the
+     * current UTC date for today's total. Rides completed before the
+     * {@code completedAt} column existed have a null timestamp and are
+     * therefore excluded from "today".
+     */
+    public DriverEarningsResponse getDriverEarnings() {
+        UserContext ctx = requireDriver();
+        List<Ride> completed = rideRepository.findDriverCompletedRides(ctx.userId());
+
+        LocalDate today = LocalDate.now(ZoneOffset.UTC);
+        double totalEarnings = 0.0;
+        int totalTrips = 0;
+        double todayEarnings = 0.0;
+        int todayTrips = 0;
+
+        for (Ride r : completed) {
+            double fare = priceService.tripFare(r);
+            totalEarnings += fare;
+            totalTrips++;
+            if (r.getCompletedAt() != null
+                    && r.getCompletedAt().atOffset(ZoneOffset.UTC).toLocalDate().equals(today)) {
+                todayEarnings += fare;
+                todayTrips++;
+            }
+        }
+
+        return DriverEarningsResponse.builder()
+                .todayEarnings(Math.round(todayEarnings * 100.0) / 100.0)
+                .todayTrips(todayTrips)
+                .totalEarnings(Math.round(totalEarnings * 100.0) / 100.0)
+                .totalTrips(totalTrips)
+                .currency("PKR")
+                .build();
+    }
+
     public RideStatsResponse getMyStats() {
         UserContext ctx = getCurrentUserContext();
         long trips = "DRIVER".equals(ctx.role())
@@ -829,6 +1007,18 @@ public class RideService {
         Double rating = avg != null ? Math.round(avg * 10.0) / 10.0 : null;
         long ratingCount = ratingRepository.countByRatedId(ctx.userId());
         return new RideStatsResponse(trips, rating, ratingCount);
+    }
+
+    /** Parse the gateway-supplied gender claim, tolerating null/unknown values. */
+    private static Gender parseGender(String value) {
+        if (value == null) {
+            return null;
+        }
+        try {
+            return Gender.valueOf(value);
+        } catch (IllegalArgumentException e) {
+            return null;
+        }
     }
 
     private UserContext getCurrentUserContext() {
