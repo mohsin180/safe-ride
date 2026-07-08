@@ -1,12 +1,16 @@
 package com.safe_ride.rides_service.controller;
 
 import com.safe_ride.rides_service.model.dtos.AvailableRideResponse;
+import com.safe_ride.rides_service.model.dtos.CancellationResult;
+import com.safe_ride.rides_service.model.dtos.CancelRideRequest;
 import com.safe_ride.rides_service.model.dtos.CreateRideRequest;
 import com.safe_ride.rides_service.model.dtos.DriverEarningsResponse;
 import com.safe_ride.rides_service.model.dtos.DriverRideHistoryResponse;
 import com.safe_ride.rides_service.model.dtos.JoinRequestBody;
 import com.safe_ride.rides_service.model.dtos.PassengerRideHistoryResponse;
+import com.safe_ride.rides_service.model.dtos.PaymentResponse;
 import com.safe_ride.rides_service.model.dtos.RateDriverRequest;
+import com.safe_ride.rides_service.model.dtos.ReportUserRequest;
 import com.safe_ride.rides_service.model.dtos.RatePassengerRequest;
 import com.safe_ride.rides_service.model.dtos.RideDetailsResponse;
 import com.safe_ride.rides_service.model.dtos.RideResponse;
@@ -44,16 +48,32 @@ public class RideController {
     @PreAuthorize("hasRole('PASSENGER')")
     public ResponseEntity<List<AvailableRideResponse>> getAvailableRides(
             @RequestParam(required = false) Double lat,
-            @RequestParam(required = false) Double lng
+            @RequestParam(required = false) Double lng,
+            @RequestParam(required = false) Double dropLat,
+            @RequestParam(required = false) Double dropLng
     ) {
-        return ResponseEntity.ok(rideService.getAvailableRides(lat, lng));
+        return ResponseEntity.ok(
+                rideService.getAvailableRides(lat, lng, dropLat, dropLng));
     }
 
+    /** Host cancels their ride. Free before the driver arrives; a flat fee is
+     *  recorded if cancelled after (ARRIVED). Body (with an optional reason) is
+     *  optional. Returns the fee applied + the rider's strike count. */
     @PostMapping("/{id}/cancel")
     @PreAuthorize("hasRole('PASSENGER')")
-    public ResponseEntity<Void> cancelRide(@PathVariable("id") UUID id) {
-        rideService.cancelRide(id);
-        return ResponseEntity.noContent().build();
+    public ResponseEntity<CancellationResult> cancelRide(
+            @PathVariable("id") UUID id,
+            @RequestBody(required = false) CancelRideRequest body) {
+        String reason = body != null ? body.reason() : null;
+        return ResponseEntity.ok(rideService.cancelRide(id, reason));
+    }
+
+    /** Host publishes the ride to the driver feed (works even with riders
+     *  already joined / seats full). */
+    @PostMapping("/{id}/publish")
+    @PreAuthorize("hasRole('PASSENGER')")
+    public ResponseEntity<RideResponse> publishRide(@PathVariable("id") UUID id) {
+        return ResponseEntity.ok(rideService.publishRide(id));
     }
 
     /** Request to join — the host must accept before the rider is added. */
@@ -135,10 +155,63 @@ public class RideController {
         return ResponseEntity.ok(rideService.getDriverFeed(lat, lng));
     }
 
-    @PostMapping("/{id}/accept")
+    /** A driver offers to drive — the host must accept before they're assigned. */
+    @PostMapping("/{id}/driver-offer")
     @PreAuthorize("hasRole('DRIVER')")
-    public ResponseEntity<RideResponse> acceptRide(@PathVariable("id") UUID id) {
-        return ResponseEntity.ok(rideService.acceptRide(id));
+    public ResponseEntity<Void> offerToDrive(@PathVariable("id") UUID id) {
+        rideService.offerToDrive(id);
+        return ResponseEntity.noContent().build();
+    }
+
+    /** The driver dismisses a ride from their feed — it stays hidden for them. */
+    @PostMapping("/{id}/driver-decline")
+    @PreAuthorize("hasRole('DRIVER')")
+    public ResponseEntity<Void> declineRideFromFeed(@PathVariable("id") UUID id) {
+        rideService.declineRideFromFeed(id);
+        return ResponseEntity.noContent().build();
+    }
+
+    /** Report another user for misconduct on a ride (recorded for moderation). */
+    @PostMapping("/{id}/report")
+    @PreAuthorize("hasAnyRole('PASSENGER','DRIVER')")
+    public ResponseEntity<Void> reportUser(
+            @PathVariable("id") UUID id, @RequestBody ReportUserRequest body) {
+        rideService.reportUser(id, body.reportedUserId(), body.reason());
+        return ResponseEntity.noContent().build();
+    }
+
+    /** Block another user — they no longer appear in each other's matching. */
+    @PostMapping("/users/{userId}/block")
+    @PreAuthorize("hasAnyRole('PASSENGER','DRIVER')")
+    public ResponseEntity<Void> blockUser(@PathVariable("userId") UUID userId) {
+        rideService.blockUser(userId);
+        return ResponseEntity.noContent().build();
+    }
+
+    /** Host accepts a driver's offer (the driver is assigned, ride → ACCEPTED). */
+    @PostMapping("/{id}/driver-offers/{offerId}/accept")
+    @PreAuthorize("hasRole('PASSENGER')")
+    public ResponseEntity<RideResponse> acceptDriverOffer(
+            @PathVariable("id") UUID id,
+            @PathVariable("offerId") UUID offerId) {
+        return ResponseEntity.ok(rideService.acceptDriverOffer(id, offerId));
+    }
+
+    /** Host declines a driver's offer. */
+    @PostMapping("/{id}/driver-offers/{offerId}/decline")
+    @PreAuthorize("hasRole('PASSENGER')")
+    public ResponseEntity<Void> declineDriverOffer(
+            @PathVariable("id") UUID id,
+            @PathVariable("offerId") UUID offerId) {
+        rideService.declineDriverOffer(id, offerId);
+        return ResponseEntity.noContent().build();
+    }
+
+    /** The assigned driver has reached the pickup point (ACCEPTED → ARRIVED). */
+    @PostMapping("/{id}/arrive")
+    @PreAuthorize("hasRole('DRIVER')")
+    public ResponseEntity<RideResponse> arriveRide(@PathVariable("id") UUID id) {
+        return ResponseEntity.ok(rideService.arriveRide(id));
     }
 
     @PostMapping("/{id}/start")
@@ -151,6 +224,41 @@ public class RideController {
     @PreAuthorize("hasRole('DRIVER')")
     public ResponseEntity<RideResponse> completeRide(@PathVariable("id") UUID id) {
         return ResponseEntity.ok(rideService.completeRide(id));
+    }
+
+    /** The assigned driver marks a rider as picked up (in the vehicle). */
+    @PostMapping("/{id}/riders/{riderId}/pickup")
+    @PreAuthorize("hasRole('DRIVER')")
+    public ResponseEntity<Void> markRiderPickedUp(
+            @PathVariable("id") UUID id, @PathVariable("riderId") UUID riderId) {
+        rideService.markRiderPickedUp(id, riderId);
+        return ResponseEntity.noContent().build();
+    }
+
+    /** The assigned driver drops a rider at their stop (settles their cash). */
+    @PostMapping("/{id}/riders/{riderId}/dropoff")
+    @PreAuthorize("hasRole('DRIVER')")
+    public ResponseEntity<Void> markRiderDroppedOff(
+            @PathVariable("id") UUID id, @PathVariable("riderId") UUID riderId) {
+        rideService.markRiderDroppedOff(id, riderId);
+        return ResponseEntity.noContent().build();
+    }
+
+    /** The ride's cash fare ledger (one entry per rider). Any member may read
+     *  it — the driver to collect, riders to see their own paid state. */
+    @GetMapping("/{id}/payments")
+    @PreAuthorize("hasAnyRole('PASSENGER','DRIVER')")
+    public ResponseEntity<List<PaymentResponse>> getPayments(@PathVariable("id") UUID id) {
+        return ResponseEntity.ok(rideService.getRidePayments(id));
+    }
+
+    /** The assigned driver confirms they collected a rider's cash fare. */
+    @PostMapping("/{id}/payments/{riderId}/collect")
+    @PreAuthorize("hasRole('DRIVER')")
+    public ResponseEntity<PaymentResponse> collectPayment(
+            @PathVariable("id") UUID id,
+            @PathVariable("riderId") UUID riderId) {
+        return ResponseEntity.ok(rideService.collectPayment(id, riderId));
     }
 
     /** The assigned driver backs out — ride re-opens (PENDING) for another driver. */

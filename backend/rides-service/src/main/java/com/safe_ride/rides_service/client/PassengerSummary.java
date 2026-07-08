@@ -9,6 +9,7 @@ import java.util.UUID;
 public record PassengerSummary(
         UUID userId,
         String fullName,
-        Double rating
+        Double rating,
+        String phoneNo
 ) {
 }

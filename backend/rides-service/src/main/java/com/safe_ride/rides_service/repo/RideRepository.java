@@ -21,6 +21,17 @@ public interface RideRepository extends JpaRepository<Ride, UUID> {
 
     long countByDriverIdAndStatus(UUID driverId, RideStatus status);
 
+    /**
+     * A passenger's completed-trip count: COMPLETED rides they took part in,
+     * whether they HOSTED it OR JOINED it as a co-passenger. DISTINCT so a
+     * ride is never double-counted. Drives the "Trips" stat for passengers.
+     */
+    @Query("SELECT COUNT(DISTINCT r.id) FROM Ride r " +
+            "WHERE r.status = com.safe_ride.rides_service.model.entity.RideStatus.COMPLETED " +
+            "AND (r.createdByUserId = :userId " +
+            "     OR r.id IN (SELECT p.ride.id FROM RideParticipants p WHERE p.userId = :userId))")
+    long countCompletedTripsForUser(@Param("userId") UUID userId);
+
     @Query("SELECT r FROM Ride r " +
             "WHERE r.status = com.safe_ride.rides_service.model.entity.RideStatus.PENDING " +
             "AND r.createdByUserId <> :currentUserId " +
@@ -84,10 +95,17 @@ public interface RideRepository extends JpaRepository<Ride, UUID> {
             "ORDER BY r.createdAt DESC")
     List<Ride> findMyActiveOrJoinedRides(@Param("userId") UUID userId);
 
+    /**
+     * The user's finished rides — COMPLETED or CANCELLED — whether they
+     * HOSTED the ride OR JOINED it as a co-passenger, so a co-passenger's
+     * past rides show in their history too (mirrors the join clause in
+     * {@link #findMyActiveOrJoinedRides}). Newest-first.
+     */
     @Query("SELECT r FROM Ride r " +
-            "WHERE r.createdByUserId = :userId " +
-            "AND r.status IN (com.safe_ride.rides_service.model.entity.RideStatus.COMPLETED, " +
-            "                 com.safe_ride.rides_service.model.entity.RideStatus.CANCELLED) " +
+            "WHERE r.status IN (com.safe_ride.rides_service.model.entity.RideStatus.COMPLETED, " +
+            "                   com.safe_ride.rides_service.model.entity.RideStatus.CANCELLED) " +
+            "AND (r.createdByUserId = :userId " +
+            "     OR r.id IN (SELECT p.ride.id FROM RideParticipants p WHERE p.userId = :userId)) " +
             "ORDER BY r.createdAt DESC")
     List<Ride> findMyRideHistory(@Param("userId") UUID userId);
 
@@ -114,12 +132,14 @@ public interface RideRepository extends JpaRepository<Ride, UUID> {
 
     /**
      * Fresh ride requests a driver can claim: still PENDING (no driver yet)
-     * and with seats left. Drivers aren't participants, so unlike the
-     * passenger feed there's no participant sub-query or creator filter.
+     * and explicitly published to drivers by the host. Seat availability is
+     * NOT a condition — a passenger group that has filled all its seats still
+     * needs a driver. Drivers aren't participants, so unlike the passenger
+     * feed there's no participant sub-query or creator filter.
      */
     @Query("SELECT r FROM Ride r " +
             "WHERE r.status = com.safe_ride.rides_service.model.entity.RideStatus.PENDING " +
-            "AND r.availableSeats > 0 " +
+            "AND r.publishedToDrivers = true " +
             "ORDER BY r.createdAt DESC")
     List<Ride> findDriverFeed();
 
@@ -131,7 +151,7 @@ public interface RideRepository extends JpaRepository<Ride, UUID> {
      */
     @Query(value = "SELECT r.* FROM ride r "
             + "WHERE r.status = 'PENDING' "
-            + "AND r.available_seats > 0 "
+            + "AND r.published_to_drivers = true "
             + "AND ST_DWithin(r.pickup_geog, ST_SetSRID(ST_MakePoint(:lng, :lat), 4326)::geography, :radiusMeters) "
             + "ORDER BY r.pickup_geog <-> ST_SetSRID(ST_MakePoint(:lng, :lat), 4326)::geography",
             nativeQuery = true)
@@ -147,6 +167,7 @@ public interface RideRepository extends JpaRepository<Ride, UUID> {
     @Query("SELECT r FROM Ride r " +
             "WHERE r.driverId = :driverId " +
             "AND r.status IN (com.safe_ride.rides_service.model.entity.RideStatus.ACCEPTED, " +
+            "                 com.safe_ride.rides_service.model.entity.RideStatus.ARRIVED, " +
             "                 com.safe_ride.rides_service.model.entity.RideStatus.STARTED) " +
             "ORDER BY r.createdAt DESC")
     List<Ride> findDriverActiveRides(@Param("driverId") UUID driverId);
@@ -158,6 +179,7 @@ public interface RideRepository extends JpaRepository<Ride, UUID> {
      */
     @Query("SELECT r FROM Ride r " +
             "WHERE r.status IN (com.safe_ride.rides_service.model.entity.RideStatus.ACCEPTED, " +
+            "                   com.safe_ride.rides_service.model.entity.RideStatus.ARRIVED, " +
             "                   com.safe_ride.rides_service.model.entity.RideStatus.STARTED) " +
             "AND (r.createdByUserId = :userId " +
             "     OR r.id IN (SELECT p.ride.id FROM RideParticipants p WHERE p.userId = :userId)) " +

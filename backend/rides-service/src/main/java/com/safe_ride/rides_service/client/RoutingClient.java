@@ -81,6 +81,40 @@ public class RoutingClient {
         }
     }
 
+    /**
+     * Driving route through an ORDERED list of waypoints (each a
+     * {@code [lat, lng]}), for the full multi-stop shared route. Returns the
+     * total road distance + duration, or {@link Optional#empty()} when the key
+     * is missing, there are fewer than 2 points, or the call/parse fails.
+     * Never throws.
+     */
+    public Optional<RouteResult> routeThrough(List<double[]> points) {
+        if (apiKey == null || apiKey.isBlank() || points == null || points.size() < 2) {
+            return Optional.empty();
+        }
+        try {
+            // Geoapify waypoints: "lat,lng|lat,lng|..." (lat first).
+            StringBuilder wp = new StringBuilder();
+            for (int i = 0; i < points.size(); i++) {
+                if (i > 0) wp.append('|');
+                wp.append(points.get(i)[0]).append(',').append(points.get(i)[1]);
+            }
+            java.net.URI uri = UriComponentsBuilder.fromUriString(routingUrl)
+                    .queryParam("waypoints", wp.toString())
+                    .queryParam("mode", "drive")
+                    .queryParam("apiKey", apiKey)
+                    .build()
+                    .encode()
+                    .toUri();
+            Map<String, Object> body = client.get().uri(uri).retrieve().body(GEOJSON_TYPE);
+            return parse(body);
+        } catch (Exception e) {
+            log.warn("Geoapify multi-waypoint routing failed ({} points): {}",
+                    points.size(), e.getMessage());
+            return Optional.empty();
+        }
+    }
+
     /** Pulls distance (m) + time (s) out of {@code features[0].properties}. */
     @SuppressWarnings("unchecked")
     private Optional<RouteResult> parse(Map<String, Object> body) {

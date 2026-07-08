@@ -12,7 +12,7 @@
     <artifactId>user-services</artifactId>
     <version>0.0.1-SNAPSHOT</version>
     <name>user-service</name>
-    <description>user-service designed for ride-sharing applications</description>
+    <description>user-service designed for ride sharing applications</description>
     <url/>
     <licenses>
         <license/>

@@ -12,6 +12,8 @@ public record JoinRequestBody(
         Double pickupLng,
         String drop,
         Double dropLat,
-        Double dropLng
+        Double dropLng,
+        /** Seats the co-passenger wants (1..seats-available). Null ⇒ 1. */
+        Integer seats
 ) {
 }

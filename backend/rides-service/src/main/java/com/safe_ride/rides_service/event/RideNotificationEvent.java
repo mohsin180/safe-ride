@@ -29,6 +29,8 @@ public record RideNotificationEvent(
 ) {
     public static final String RIDE_CREATED = "RIDE_CREATED";
     public static final String RIDE_ACCEPTED = "RIDE_ACCEPTED";
+    /** The assigned driver has reached the pickup point. */
+    public static final String RIDE_ARRIVED = "RIDE_ARRIVED";
     public static final String RIDE_STARTED = "RIDE_STARTED";
     public static final String RIDE_COMPLETED = "RIDE_COMPLETED";
     public static final String RIDE_CANCELLED = "RIDE_CANCELLED";
@@ -43,4 +45,10 @@ public record RideNotificationEvent(
     public static final String JOIN_ACCEPTED = "JOIN_ACCEPTED";
     /** The host declined a join request. */
     public static final String JOIN_DECLINED = "JOIN_DECLINED";
+    /** A driver offered to drive a ride — the host accepts or declines. */
+    public static final String DRIVER_OFFER = "DRIVER_OFFER";
+    /** The host accepted a driver's offer (the driver is now assigned). */
+    public static final String DRIVER_OFFER_ACCEPTED = "DRIVER_OFFER_ACCEPTED";
+    /** The host declined a driver's offer. */
+    public static final String DRIVER_OFFER_DECLINED = "DRIVER_OFFER_DECLINED";
 }

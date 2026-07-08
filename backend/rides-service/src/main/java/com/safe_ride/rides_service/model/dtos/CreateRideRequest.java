@@ -3,6 +3,8 @@ package com.safe_ride.rides_service.model.dtos;
 import com.safe_ride.rides_service.model.entity.RideType;
 import jakarta.validation.constraints.*;
 
+import java.time.Instant;
+
 public record CreateRideRequest(
         @NotBlank(message = "is required")
         String pickup,
@@ -35,6 +37,10 @@ public record CreateRideRequest(
         int seats,
 
         @NotNull(message = "is required (ECONOMY or PREMIUM)")
-        RideType rideType
+        RideType rideType,
+
+        /** Optional scheduled departure (ISO-8601 instant). Null / past = leave
+         *  now (on-demand); a future time schedules the ride. */
+        Instant departureTime
 ) {
 }

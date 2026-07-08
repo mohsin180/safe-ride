@@ -82,4 +82,29 @@ public class NotificationPublisher {
             log.warn("Failed to publish JOIN_REQUEST for ride {}: {}", rideId, e.getMessage());
         }
     }
+
+    /**
+     * A driver's offer to drive, sent to the host. Carries the driver's
+     * identity + rating + the offer id (reusing the requestId/rating fields)
+     * so the host's notification can render the accept/decline card. pickup/
+     * drop are the ride's own route, for context.
+     */
+    public void publishDriverOffer(UUID rideId, List<UUID> recipients,
+                                   UUID driverId, String driverName, Double driverRating,
+                                   UUID offerId, String pickup, String drop) {
+        List<UUID> cleaned = recipients == null ? List.of()
+                : recipients.stream().filter(java.util.Objects::nonNull).distinct().toList();
+        if (cleaned.isEmpty()) {
+            return;
+        }
+        RideNotificationEvent event = new RideNotificationEvent(
+                RideNotificationEvent.DRIVER_OFFER, rideId, cleaned, pickup, drop, null,
+                driverId, driverName, offerId, driverRating, Instant.now());
+        try {
+            rabbitTemplate.convertAndSend(
+                    RabbitConfig.EXCHANGE, "ride." + RideNotificationEvent.DRIVER_OFFER, event);
+        } catch (Exception e) {
+            log.warn("Failed to publish DRIVER_OFFER for ride {}: {}", rideId, e.getMessage());
+        }
+    }
 }

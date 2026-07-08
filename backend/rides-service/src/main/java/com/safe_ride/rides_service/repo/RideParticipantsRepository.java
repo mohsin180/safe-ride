@@ -16,6 +16,8 @@ public interface RideParticipantsRepository extends JpaRepository<RideParticipan
 
     boolean existsByRide_IdAndUserId(UUID rideId, UUID userId);
 
+    java.util.Optional<RideParticipants> findByRide_IdAndUserId(UUID rideId, UUID userId);
+
     long deleteByRide_IdAndUserId(UUID rideId, UUID userId);
 
     /** Co-passenger userIds for a ride — used to address notifications. */

@@ -61,7 +61,8 @@ public class InternalProfileController {
     }
 
     private PassengerSummaryResponse toSummary(PassengerProfile p) {
-        return new PassengerSummaryResponse(p.getUserId(), p.getFullName(), p.getRating());
+        return new PassengerSummaryResponse(
+                p.getUserId(), p.getFullName(), p.getRating(), p.getPhoneNo());
     }
 
     /**

@@ -26,4 +26,7 @@ public class PassengerRideHistoryResponse {
     private String driverName;
     private String carInfo;
     private Double ratingGiven;
+    /** Whether this rider's cash fare was collected by the driver (completed
+     *  rides only). Null when there's no payment record (e.g. cancelled). */
+    private Boolean paid;
 }

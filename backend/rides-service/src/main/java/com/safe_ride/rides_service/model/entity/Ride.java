@@ -4,6 +4,7 @@ import jakarta.persistence.*;
 import lombok.AllArgsConstructor;
 import lombok.Data;
 import lombok.NoArgsConstructor;
+import org.hibernate.annotations.ColumnDefault;
 import org.hibernate.annotations.CreationTimestamp;
 
 import java.time.Instant;
@@ -47,6 +48,13 @@ public class Ride {
     private int totalSeats;
     @Column(nullable = false)
     private int availableSeats;
+    /** How many seats the HOST reserved for their own party (1..4). Stored
+     *  separately from availableSeats (which also shrinks as co-passengers
+     *  join) so the host always sees their real booking. @ColumnDefault
+     *  backfills legacy rows to a single seat. */
+    @Column(nullable = false)
+    @ColumnDefault("1")
+    private int hostSeats = 1;
     @Enumerated(EnumType.STRING)
     @Column(nullable = false)
     private RideType rideType;
@@ -55,6 +63,15 @@ public class Ride {
     @Column(nullable = false)
     @Enumerated(EnumType.STRING)
     private RideStatus status;
+
+    /** Whether the host has published this ride to the driver feed. Hosts
+     *  gather co-passengers first, then publish; drivers only ever see
+     *  published, still-PENDING rides. Defaults false at creation.
+     *  {@code @ColumnDefault} so the auto-added column backfills existing
+     *  rows (Postgres needs a default to add a NOT NULL column). */
+    @Column(nullable = false)
+    @ColumnDefault("false")
+    private boolean publishedToDrivers = false;
     /** Road (driving) distance of the trip in km, resolved from the routing
      *  API at creation time. Falls back to the Haversine straight-line distance
      *  when routing is unavailable. Null only for legacy rides created before
@@ -64,6 +81,10 @@ public class Ride {
      *  at creation time. Falls back to a distance/30 km/h estimate when routing
      *  is unavailable. Null only for legacy rides. */
     private Integer routeDurationMin;
+    /** When the host wants to leave. Null = on-demand ("leave now"); a future
+     *  instant = a scheduled ride. Drives the "scheduled" badge, feed ordering,
+     *  and lets riders plan ahead. */
+    private Instant departureTime;
     @CreationTimestamp
     @Column(nullable = false, updatable = false)
     private Instant createdAt;

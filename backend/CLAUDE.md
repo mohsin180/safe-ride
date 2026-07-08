@@ -10,7 +10,7 @@ This is a multi-module Spring Boot microservices project for a ride-sharing app.
 - `api-gateway/` — Spring Cloud Gateway on **WebFlux** (port **8080**). The single public entry point.
 - `user-services/` — Auth, registration, email verification, JWT issuance (port **8001**, DB `user_db`). Uses Spring **WebMVC**. Note the artifact is `user-services` but the Spring `application.name` is `user-service`.
 - `profile-service/` — Driver/passenger profile CRUD (port **8002**, DB `profile_db`). WebMVC.
-- `rides-service/` — Ride creation/booking. **Skeleton only** — controller method body is empty, service is empty, no `application.yaml` for the config-server import. Do not assume it runs.
+- `rides-service/` — Core ride lifecycle (port **8003**, DB `ride_db`). **Fully implemented**: create/cancel/publish, co-passenger join → host accept/decline, driver offer → host accept/decline, per-seat fare, ratings, driver feed/status, ride history, and an `internal` controller serving chat membership to messaging-service. WebMVC.
 - `docker/init.sql` + `docker-compose.yaml` — Postgres 16 + Adminer; creates `user_db`, `profile_db`, `ride_db` on first start.
 
 There is also a stale `ride-service/` directory shown as deleted in `git status`; the active module is `rides-service/` (with the `s`).
@@ -75,7 +75,7 @@ A user goes through three gates in `UserService.login()` before getting a token:
 
 ## DDL behavior
 
-`user-services` is configured with `spring.jpa.hibernate.ddl-auto: create` — **the schema is dropped and recreated on every restart**. `profile-service` uses `update`. If you change a `user-services` entity, expect data loss on restart; if you change a `profile-service` entity, expect possible silent schema drift.
+All services default to `spring.jpa.hibernate.ddl-auto: ${JPA_DDL_AUTO:update}` (see each `config-server/src/main/resources/config/*.y*ml`), and the backend `.env` sets `JPA_DDL_AUTO=update`. So the schema is **updated, not recreated**, on restart — data is preserved. If you change an entity, expect possible silent schema drift rather than data loss. (Set `JPA_DDL_AUTO=create`/`create-drop` only when you intentionally want a clean schema.)
 
 ## Spring Boot version
 

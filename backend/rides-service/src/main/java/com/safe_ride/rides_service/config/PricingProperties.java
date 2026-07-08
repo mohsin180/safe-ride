@@ -23,8 +23,21 @@ public class PricingProperties {
     private double premiumMultiplier = 1.5;
     /** Floor the gross trip fare never drops below. */
     private double minFare = 80.0;
+    /**
+     * Flat fee recorded when a rider cancels after the driver has already
+     * reached the pickup (ride is ARRIVED). Cancelling any earlier is free.
+     */
+    private double cancellationFee = 50.0;
     /** ISO-ish currency label echoed back in fare DTOs. */
     private String currency = "PKR";
+
+    public double getCancellationFee() {
+        return cancellationFee;
+    }
+
+    public void setCancellationFee(double cancellationFee) {
+        this.cancellationFee = cancellationFee;
+    }
 
     public double getBaseFare() {
         return baseFare;

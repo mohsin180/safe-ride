@@ -19,6 +19,8 @@ public record RideResponse(
         int seats,
         RideType rideType,
         RideStatus status,
-        Instant createdAt
+        Instant createdAt,
+        /** Scheduled departure; null = on-demand ("leave now"). */
+        Instant departureTime
 ) {
 }

@@ -42,6 +42,10 @@ public class JoinRequest {
     private Double dropLat;
     private Double dropLng;
 
+    /** How many seats the requester wants (1..seats-available). Defaults to 1
+     *  when the client doesn't specify. */
+    private Integer seats;
+
     @Enumerated(EnumType.STRING)
     @Column(nullable = false)
     private JoinRequestStatus status;

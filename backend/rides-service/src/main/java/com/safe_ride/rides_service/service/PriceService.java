@@ -4,6 +4,7 @@ import com.safe_ride.rides_service.config.PricingProperties;
 import com.safe_ride.rides_service.model.dtos.RideDetailsResponse;
 import com.safe_ride.rides_service.model.entity.Ride;
 import com.safe_ride.rides_service.model.entity.RideType;
+import com.safe_ride.rides_service.repo.RideParticipantsRepository;
 import org.springframework.stereotype.Service;
 
 /**
@@ -26,32 +27,35 @@ public class PriceService {
     private static final double FALLBACK_SPEED_KMPH = 30.0;
 
     private final PricingProperties props;
+    private final RideParticipantsRepository rideParticipantsRepository;
 
-    public PriceService(PricingProperties props) {
+    public PriceService(PricingProperties props,
+                        RideParticipantsRepository rideParticipantsRepository) {
         this.props = props;
+        this.rideParticipantsRepository = rideParticipantsRepository;
     }
 
     /**
-     * The per-rider estimate shown in the "available rides" / driver feed as
-     * "Your fare". This now returns the EXACT same value as
-     * {@code computeFare(...).perRider} (via the shared {@link #perSeatFare}
-     * helper), so the feed and the ride-details screen always agree. Returns
-     * null if the ride has no pickup/destination to measure.
+     * The per-rider fare shown in the "available rides" / driver feed as
+     * "Your fare". Same value as {@code computeFare(...).perRider} (via the
+     * shared {@link #perRiderFare} helper) so the feed and the ride-details
+     * screen always agree. Returns null if the ride has no pickup/destination
+     * to measure.
      */
     public Double estimateRiderFare(Ride ride) {
         if (ride.getPickup() == null || ride.getDestination() == null) {
             return null;
         }
-        return perSeatFare(ride);
+        return perRiderFare(ride);
     }
 
     /**
-     * Full fare breakdown for the ride-details screen. The {@code seatsBooked}
-     * argument is kept for the call-site signature but no longer drives the
-     * per-rider price — {@code perRider} is now a fixed per-seat price (same as
-     * the feed estimate), intentionally independent of how many have booked.
+     * Full fare breakdown for the ride-details screen. The gross trip cost is
+     * split evenly among the ACTUAL riders (host + joined co-passengers). No
+     * discount is applied — the driver always collects the full gross; riders
+     * simply share it (so more riders = cheaper each, driver take unchanged).
      */
-    public RideDetailsResponse.FareDto computeFare(Ride ride, int seatsBooked) {
+    public RideDetailsResponse.FareDto computeFare(Ride ride) {
         if (ride.getPickup() == null || ride.getDestination() == null) {
             return RideDetailsResponse.FareDto.builder()
                     .baseFare(0.0)
@@ -61,20 +65,18 @@ public class PriceService {
                     .build();
         }
         double gross = gross(ride);
-        int totalSeats = Math.max(1, ride.getTotalSeats());
-        double discount = totalSeats > 1 ? round2(gross * props.getSharedDiscountRate()) : 0.0;
         return RideDetailsResponse.FareDto.builder()
-                .baseFare(round2(gross))
-                .sharedDiscount(discount)
-                .perRider(perSeatFare(ride))
+                .baseFare(round2(gross))       // full trip cost
+                .sharedDiscount(0.0)           // no discount, solo or shared
+                .perRider(perRiderFare(ride))  // each rider's equal share
                 .currency(props.getCurrency())
                 .build();
     }
 
     /**
-     * The un-split gross trip total — the driver's gross for the trip, used by
-     * driver ride-history fares and earnings. Returns 0.0 if the ride has no
-     * pickup/destination to measure.
+     * The trip total the driver collects — the full gross (all riders' shares
+     * combined). Used by driver ride-history fares and earnings. 0.0 if the
+     * ride has no route to measure.
      */
     public double tripFare(Ride ride) {
         if (ride.getPickup() == null || ride.getDestination() == null) {
@@ -83,18 +85,21 @@ public class PriceService {
         return round2(gross(ride));
     }
 
+    /** Number of riders splitting the fare: the host plus every joined
+     *  co-passenger. Always at least 1. */
+    private int riderCount(Ride ride) {
+        int coPassengers =
+                rideParticipantsRepository.findUserIdsByRideId(ride.getId()).size();
+        return 1 + coPassengers;
+    }
+
     /**
-     * The single source of truth for the per-seat price. Used by BOTH the feed
-     * estimate ({@link #estimateRiderFare}) and the details breakdown
-     * ({@code computeFare(...).perRider}) so the two can never diverge:
-     * {@code (gross - sharedDiscount) / totalSeats}, where the shared discount
-     * only applies when the ride seats more than one.
+     * Each rider's share: the gross split evenly across the actual riders (no
+     * discount). The single source of truth for both the feed estimate and the
+     * details breakdown so they can never diverge.
      */
-    private double perSeatFare(Ride ride) {
-        double gross = gross(ride);
-        int totalSeats = Math.max(1, ride.getTotalSeats());
-        double discount = totalSeats > 1 ? gross * props.getSharedDiscountRate() : 0.0;
-        return round2((gross - discount) / totalSeats);
+    private double perRiderFare(Ride ride) {
+        return round2(gross(ride) / Math.max(1, riderCount(ride)));
     }
 
     /**

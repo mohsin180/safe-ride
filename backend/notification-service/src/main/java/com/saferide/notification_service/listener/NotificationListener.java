@@ -64,6 +64,15 @@ public class NotificationListener {
                 n.setRequestId(event.requestId());
                 n.setPickup(event.pickup());
                 n.setDrop(event.drop());
+            } else if ("DRIVER_OFFER".equals(event.type())) {
+                // The host's card needs the driver's identity + rating and the
+                // offer id (carried in requestId) to accept/decline the driver.
+                n.setSubjectUserId(event.actorId());
+                n.setSubjectName(event.actorName());
+                n.setSubjectRating(event.rating());
+                n.setRequestId(event.requestId());
+                n.setPickup(event.pickup());
+                n.setDrop(event.drop());
             }
             n.setRead(false);
             batch.add(n);
@@ -78,6 +87,8 @@ public class NotificationListener {
                     "Your ride to " + drop + " is posted. Hang tight for a driver.");
             case "RIDE_ACCEPTED" -> new Content("TRIP", "Ride accepted",
                     "A driver accepted your ride to " + drop + ".");
+            case "RIDE_ARRIVED" -> new Content("TRIP", "Driver arrived",
+                    "Your driver is at " + pickup + ". Head out to meet them.");
             case "RIDE_STARTED" -> new Content("TRIP", "Ride started",
                     "Your trip to " + drop + " is on the way.");
             case "RIDE_COMPLETED" -> new Content("TRIP", "Ride completed",
@@ -103,6 +114,15 @@ public class NotificationListener {
                     "You're in! Your ride to " + drop + " is confirmed.");
             case "JOIN_DECLINED" -> new Content("REQUEST", "Request declined",
                     "Your request to join the ride to " + drop + " was declined.");
+            case "DRIVER_OFFER" -> new Content("DRIVER_OFFER",
+                    (e.actorName() != null ? e.actorName() : "A driver") + " offered to drive",
+                    (e.actorName() != null ? e.actorName() : "A driver")
+                            + " wants to drive your ride to " + drop
+                            + ". Accept or decline below.");
+            case "DRIVER_OFFER_ACCEPTED" -> new Content("TRIP", "You're driving",
+                    "The host accepted your offer for the ride to " + drop + ".");
+            case "DRIVER_OFFER_DECLINED" -> new Content("TRIP", "Offer declined",
+                    "Your offer to drive the ride to " + drop + " was declined.");
             default -> new Content("SYSTEM", "Update",
                     "There's an update on your ride.");
         };
