@@ -29,6 +29,11 @@ public class RideDetailsResponse {
     /** The VIEWER's own booked seats — the host's party for the host, a
      *  co-passenger's chosen seats for them. Null for a non-member browsing. */
     private Integer yourSeats;
+    /** FULL shared-route distance (km) + duration (min) through every rider's
+     *  stops — recomputed whenever a co-passenger joins/leaves, so screens can
+     *  show the trip growing instead of just the host's direct route. */
+    private Double tripDistanceKm;
+    private Integer tripDurationMin;
 
     private HostDto host;
     private Integer seatsTotal;
@@ -75,6 +80,8 @@ public class RideDetailsResponse {
         private String phone;
         /** Trip progress once STARTED: WAITING | PICKED | DROPPED. Null before start. */
         private String pickupStatus;
+        /** This rider's weighted share of the trip fare (leg × seats model). */
+        private Double fareShare;
     }
 
     @Data
@@ -88,10 +95,16 @@ public class RideDetailsResponse {
         private Integer ratingCount;
         private Integer trips;
         private String gender;
-        /** Contact number, so the assigned driver can call to coordinate. */
+        /** Contact number, so the driver can call to coordinate. */
         private String phone;
+        /** This co-passenger's OWN pickup / drop-off (from their join request),
+         *  so the driver can see everyone's stops before offering to drive. */
+        private String pickup;
+        private String drop;
         /** Trip progress once STARTED: WAITING | PICKED | DROPPED. Null before start. */
         private String pickupStatus;
+        /** This rider's weighted share of the trip fare (leg × seats model). */
+        private Double fareShare;
     }
 
     /** One stop on the shared route. [ownerId] pairs a person's PICKUP with

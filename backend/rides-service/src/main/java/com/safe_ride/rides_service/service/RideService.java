@@ -9,6 +9,8 @@ import com.safe_ride.rides_service.client.RoutingClient;
 import com.safe_ride.rides_service.config.PricingProperties;
 import com.safe_ride.rides_service.config.UserContext;
 import com.safe_ride.rides_service.model.dtos.CancellationResult;
+import com.safe_ride.rides_service.model.dtos.HostAcceptFarePreviewResponse;
+import com.safe_ride.rides_service.model.dtos.JoinFarePreviewResponse;
 import com.safe_ride.rides_service.model.dtos.PaymentResponse;
 import com.safe_ride.rides_service.model.entity.DriverDeclinedRide;
 import com.safe_ride.rides_service.model.entity.PaymentStatus;
@@ -179,10 +181,9 @@ public class RideService {
         // Remember the host's own booking (their party size) so it's shown
         // correctly even after co-passengers join and shrink availableSeats.
         ride.setHostSeats(request.seats());
-        // Publish to the driver feed immediately on create, so a new request is
-        // discoverable by drivers right away (matches the "Finding drivers…"
-        // confirmation). Co-passengers can still join a published ride.
-        ride.setPublishedToDrivers(true);
+        // NOT auto-published: the host decides when the ride goes to the
+        // driver feed via the "Publish to drivers" button — e.g. after
+        // gathering co-passengers first.
         // Scheduled ride: keep a departure time only if it's genuinely in the
         // future; a null or past time means "leave now" (on-demand).
         if (request.departureTime() != null
@@ -196,6 +197,10 @@ public class RideService {
         // Haversine straight-line distance and a 30 km/h duration estimate, so
         // every ride still gets a stored distance + duration.
         stampRouteDistance(ride);
+        // Freeze the host's solo leg as the pricing baseline (their fare is
+        // capped at this leg's solo cost, however the shared route grows).
+        ride.setHostLegKm(ride.getRouteDistanceKm());
+        ride.setHostLegMin(ride.getRouteDurationMin());
 
         Ride saved = rideRepository.save(ride);
         // Confirmation to the creator that their request is posted.
@@ -317,6 +322,114 @@ public class RideService {
             ride.setRouteDistanceKm(Math.round(km * 100.0) / 100.0);
             ride.setRouteDurationMin((int) Math.round((km / 30.0) * 60));
         }
+    }
+
+    /**
+     * Simulated trip metrics {@code [km, minutes]} for this ride's current
+     * stops PLUS an optional candidate rider's pickup/drop — same
+     * pickups-then-drops nearest-neighbour ordering as {@link #restampFullRoute},
+     * but Haversine-only (no routing API), so previews are instant and free.
+     */
+    private double[] simulatedRouteMetrics(Ride ride, Double addPickupLat,
+            Double addPickupLng, Double addDropLat, Double addDropLng) {
+        List<double[]> pickups = new ArrayList<>();
+        List<double[]> drops = new ArrayList<>();
+        pickups.add(new double[]{ride.getPickup().getLatitude(),
+                ride.getPickup().getLongitude()});
+        drops.add(new double[]{ride.getDestination().getLatitude(),
+                ride.getDestination().getLongitude()});
+        Map<UUID, JoinRequest> accepted = joinRequestRepository
+                .findByRideIdAndStatus(ride.getId(), JoinRequestStatus.ACCEPTED)
+                .stream()
+                .collect(Collectors.toMap(JoinRequest::getRequesterId, jr -> jr, (a, b) -> a));
+        for (UUID riderId : rideParticipantsRepository.findUserIdsByRideId(ride.getId())) {
+            JoinRequest jr = accepted.get(riderId);
+            if (jr == null) continue;
+            if (jr.getPickupLat() != null && jr.getPickupLng() != null) {
+                pickups.add(new double[]{jr.getPickupLat(), jr.getPickupLng()});
+            }
+            if (jr.getDropLat() != null && jr.getDropLng() != null) {
+                drops.add(new double[]{jr.getDropLat(), jr.getDropLng()});
+            }
+        }
+        if (addPickupLat != null && addPickupLng != null) {
+            pickups.add(new double[]{addPickupLat, addPickupLng});
+        }
+        if (addDropLat != null && addDropLng != null) {
+            drops.add(new double[]{addDropLat, addDropLng});
+        }
+        List<double[]> ordered = new ArrayList<>();
+        double[] cursor = pickups.get(0);
+        ordered.add(cursor);
+        cursor = drainNearest(cursor, new ArrayList<>(pickups.subList(1, pickups.size())), ordered);
+        drainNearest(cursor, new ArrayList<>(drops), ordered);
+        double km = 0.0;
+        for (int i = 1; i < ordered.size(); i++) {
+            km += priceService.distanceKm(ordered.get(i - 1)[0], ordered.get(i - 1)[1],
+                    ordered.get(i)[0], ordered.get(i)[1]);
+        }
+        return new double[]{km, (km / 30.0) * 60.0};
+    }
+
+    /** Sentinel key for the candidate rider inside a shares preview. */
+    private static final UUID PREVIEW_CANDIDATE = new UUID(0L, 0L);
+
+    /** What would a rider with this route + seats pay if they joined? */
+    @Transactional(readOnly = true)
+    public JoinFarePreviewResponse previewJoinFare(UUID rideId, double pickupLat,
+            double pickupLng, double dropLat, double dropLng, int seats) {
+        Ride ride = rideRepository.findById(rideId)
+                .orElseThrow(() -> new NotFoundException("Ride not found"));
+        if (ride.getPickup() == null || ride.getDestination() == null) {
+            throw new ConflictException("Ride has no route to price");
+        }
+        double[] m = simulatedRouteMetrics(ride, pickupLat, pickupLng, dropLat, dropLng);
+        double gross = Math.round(priceService.grossFromMetrics(
+                m[0], m[1], ride.getRideType()) * 100.0) / 100.0;
+        double leg = priceService.distanceKm(pickupLat, pickupLng, dropLat, dropLng);
+        Map<UUID, Double> shares = priceService.previewShares(
+                ride, PREVIEW_CANDIDATE, leg, seats, gross);
+        return new JoinFarePreviewResponse(
+                shares.getOrDefault(PREVIEW_CANDIDATE, 0.0),
+                shares.getOrDefault(ride.getCreatedByUserId(), 0.0),
+                gross, Math.round(m[0] * 10.0) / 10.0, (int) Math.round(m[1]),
+                pricingProperties.getCurrency());
+    }
+
+    /** The host's before/after fare picture for a pending join request. */
+    @Transactional(readOnly = true)
+    public HostAcceptFarePreviewResponse previewAcceptFare(UUID rideId, UUID requestId) {
+        UserContext ctx = getCurrentUserContext();
+        Ride ride = rideRepository.findById(rideId)
+                .orElseThrow(() -> new NotFoundException("Ride not found"));
+        if (!ride.getCreatedByUserId().equals(ctx.userId())) {
+            throw new ForbiddenException("Only the host can preview join requests");
+        }
+        JoinRequest jr = joinRequestRepository.findById(requestId)
+                .orElseThrow(() -> new NotFoundException("Request not found"));
+        if (!jr.getRideId().equals(rideId)) {
+            throw new NotFoundException("Request not found");
+        }
+        double now = priceService.computeShares(ride)
+                .getOrDefault(ride.getCreatedByUserId(), 0.0);
+        // Missing requester coords → neutral preview on the current route.
+        Double pLat = jr.getPickupLat(); Double pLng = jr.getPickupLng();
+        Double dLat = jr.getDropLat(); Double dLng = jr.getDropLng();
+        double[] m = simulatedRouteMetrics(ride, pLat, pLng, dLat, dLng);
+        double gross = Math.round(priceService.grossFromMetrics(
+                m[0], m[1], ride.getRideType()) * 100.0) / 100.0;
+        double leg = (pLat != null && pLng != null && dLat != null && dLng != null)
+                ? priceService.distanceKm(pLat, pLng, dLat, dLng)
+                : 1.0;
+        int seats = jr.getSeats() != null && jr.getSeats() > 0 ? jr.getSeats() : 1;
+        Map<UUID, Double> shares = priceService.previewShares(
+                ride, PREVIEW_CANDIDATE, leg, seats, gross);
+        return new HostAcceptFarePreviewResponse(
+                now,
+                shares.getOrDefault(ride.getCreatedByUserId(), 0.0),
+                shares.getOrDefault(PREVIEW_CANDIDATE, 0.0),
+                gross, Math.round(m[0] * 10.0) / 10.0, (int) Math.round(m[1]),
+                pricingProperties.getCurrency());
     }
 
     /** Greedily append the nearest remaining point to {@code out} until the
@@ -616,6 +729,18 @@ public class RideService {
         restampFullRoute(ride);
         rideRepository.save(ride);
 
+        // If the trip's cash ledger was already opened (ride STARTED), remove
+        // the leaver's un-collected payment + progress row — otherwise their
+        // never-paid share would be auto-"collected" at complete and inflate
+        // the driver's earnings with phantom cash.
+        ridePaymentRepository.findByRideIdAndUserId(rideId, userId).ifPresent(p -> {
+            if (p.getStatus() != PaymentStatus.COLLECTED) {
+                ridePaymentRepository.delete(p);
+            }
+        });
+        rideRiderProgressRepository.findByRideIdAndUserId(rideId, userId)
+                .ifPresent(rideRiderProgressRepository::delete);
+
         // Preserve the fact that this user was on the ride (the participant
         // row is gone) so the bidirectional leave-time ratings can authorize.
         if (!rideDepartureRepository.existsByRideIdAndUserId(rideId, userId)) {
@@ -643,7 +768,12 @@ public class RideService {
     }
 
     public List<AvailableRideResponse> getAvailableRides(Double lat, Double lng) {
-        return getAvailableRides(lat, lng, null, null);
+        return getAvailableRides(lat, lng, null, null, null);
+    }
+
+    public List<AvailableRideResponse> getAvailableRides(
+            Double lat, Double lng, Double dropLat, Double dropLng) {
+        return getAvailableRides(lat, lng, dropLat, dropLng, null);
     }
 
     /** How far a ride's drop-off may be from the rider's own destination and
@@ -651,7 +781,7 @@ public class RideService {
     private static final double DROP_MATCH_RADIUS_KM = 8.0;
 
     public List<AvailableRideResponse> getAvailableRides(
-            Double lat, Double lng, Double dropLat, Double dropLng) {
+            Double lat, Double lng, Double dropLat, Double dropLng, Integer seats) {
         UserContext ctx = getCurrentUserContext();
         UUID currentUserId = ctx.userId();
 
@@ -708,9 +838,25 @@ public class RideService {
                 rides.stream().map(Ride::getCreatedByUserId).toList());
 
         // The DB already returned them nearest-first; preserve that order and
-        // just attach each ride's distance/fare for display.
+        // just attach each ride's distance/fare for display. When we know the
+        // searcher's route + seats, "Your fare" becomes the TRUE weighted
+        // preview (their detour + headcount + seats), not the current split.
+        int searcherSeats = seats != null && seats > 0 ? seats : 1;
         return rides.stream()
-                .map(r -> toAvailableRideResponse(r, lat, lng, hosts))
+                .map(r -> {
+                    AvailableRideResponse resp = toAvailableRideResponse(r, lat, lng, hosts);
+                    if (lat != null && lng != null && dropLat != null && dropLng != null
+                            && r.getPickup() != null && r.getDestination() != null) {
+                        try {
+                            JoinFarePreviewResponse p = previewJoinFare(
+                                    r.getId(), lat, lng, dropLat, dropLng, searcherSeats);
+                            resp.setFareForRider(Math.round(p.yourShare() * 100.0) / 100.0);
+                        } catch (Exception ignored) {
+                            // keep the rough estimate on any preview failure
+                        }
+                    }
+                    return resp;
+                })
                 .toList();
     }
 
@@ -1124,13 +1270,15 @@ public class RideService {
         if (ridePaymentRepository.existsByRideId(ride.getId())) {
             return;
         }
-        double perRider = priceService.computeFare(ride).getPerRider();
+        // Each rider owes their WEIGHTED share (leg × seats, host solo-capped);
+        // the shares sum exactly to the gross, so the driver collects in full.
+        Map<UUID, Double> shares = priceService.computeShares(ride);
         String currency = pricingProperties.getCurrency();
         for (UUID riderId : hostAndParticipants(ride)) {
             RidePayment p = new RidePayment();
             p.setRideId(ride.getId());
             p.setUserId(riderId);
-            p.setAmount(perRider);
+            p.setAmount(shares.getOrDefault(riderId, 0.0));
             p.setCurrency(currency);
             p.setMethod("CASH");
             p.setStatus(PaymentStatus.PENDING);
@@ -1316,16 +1464,27 @@ public class RideService {
         peopleIds.addAll(joinedIds);
         Map<UUID, PassengerSummary> people = fetchPassengerSummaries(peopleIds);
 
-        // Rider phone numbers are shared only with the assigned driver, so they
-        // can call to coordinate pickup — not exposed to other riders.
-        boolean viewerIsDriver = ride.getDriverId() != null
-                && ride.getDriverId().equals(viewerId);
+        // Each accepted co-passenger's own route (their join request), keyed by
+        // requester — used for their stops AND for the driver's review card.
+        Map<UUID, JoinRequest> acceptedByRequester = joinRequestRepository
+                .findByRideIdAndStatus(rideId, JoinRequestStatus.ACCEPTED).stream()
+                .collect(Collectors.toMap(
+                        JoinRequest::getRequesterId, jr -> jr, (a, b) -> a));
+
+        // Phone numbers are shared with drivers (to call riders and coordinate
+        // pickup) — not between riders. A driver reviewing/​driving the ride
+        // sees them; passengers never see each other's numbers.
+        boolean viewerIsDriver = "DRIVER".equals(ctx.role());
 
         // Per-rider pickup/drop progress (empty until the trip starts).
         Map<UUID, String> progress = rideRiderProgressRepository.findByRideId(rideId)
                 .stream()
                 .collect(Collectors.toMap(RideRiderProgress::getUserId,
                         p -> p.getStatus().name(), (a, b) -> a));
+
+        // Weighted fare shares (leg × seats, host capped at solo) so every
+        // screen can show each rider's real amount.
+        Map<UUID, Double> fareShares = priceService.computeShares(ride);
 
         RideDetailsResponse.HostDto host = RideDetailsResponse.HostDto.builder()
                 .id(hostId.toString())
@@ -1336,28 +1495,35 @@ public class RideService {
                 .gender(ride.getGender() != null ? ride.getGender().name() : null)
                 .phone(viewerIsDriver ? resolvePhone(people, hostId) : null)
                 .pickupStatus(progress.get(hostId))
+                .fareShare(fareShares.get(hostId))
                 .build();
 
         List<RideDetailsResponse.CoPassengerDto> coPassengers = joinedIds.stream()
                 .filter(id -> !id.equals(hostId))
                 .filter(id -> !id.equals(viewerId))
-                .map(id -> RideDetailsResponse.CoPassengerDto.builder()
-                        .id(id.toString())
-                        .name(resolveName(people, id))
-                        .rating(resolveRating(people, id))
-                        .ratingCount((int) ratingRepository.countByRatedId(id))
-                        .trips((int) rideRepository.countCompletedTripsForUser(id))
-                        .gender(null)
-                        .phone(viewerIsDriver ? resolvePhone(people, id) : null)
-                        .pickupStatus(progress.get(id))
-                        .build())
+                .map(id -> {
+                    JoinRequest jr = acceptedByRequester.get(id);
+                    return RideDetailsResponse.CoPassengerDto.builder()
+                            .id(id.toString())
+                            .name(resolveName(people, id))
+                            .rating(resolveRating(people, id))
+                            .ratingCount((int) ratingRepository.countByRatedId(id))
+                            .trips((int) rideRepository.countCompletedTripsForUser(id))
+                            .gender(null)
+                            .phone(viewerIsDriver ? resolvePhone(people, id) : null)
+                            .pickup(jr != null ? jr.getPickup() : null)
+                            .drop(jr != null ? jr.getDrop() : null)
+                            .pickupStatus(progress.get(id))
+                            .fareShare(fareShares.get(id))
+                            .build();
+                })
                 .toList();
 
         // availableSeats on the ride is authoritative (it already accounts for
         // the host's reserved seats + each co-passenger's chosen seats).
         int seatsAvailable = Math.max(0, ride.getAvailableSeats());
 
-        RideDetailsResponse.FareDto fare = priceService.computeFare(ride);
+        RideDetailsResponse.FareDto fare = priceService.computeFare(ride, viewerId);
 
         // Derived from the participant ids we already loaded above.
         boolean youHaveJoined = joinedIds.contains(viewerId);
@@ -1426,11 +1592,7 @@ public class RideService {
         // participant row removed but their JoinRequest stays ACCEPTED (see
         // leaveRide), so keying off accepted requests alone would keep drawing
         // stops for people no longer on the ride. joinedIds is the live
-        // participant set; we use the accepted request purely for coords.
-        Map<UUID, JoinRequest> acceptedByRequester = joinRequestRepository
-                .findByRideIdAndStatus(rideId, JoinRequestStatus.ACCEPTED).stream()
-                .collect(Collectors.toMap(
-                        JoinRequest::getRequesterId, jr -> jr, (a, b) -> a));
+        // participant set; we use the accepted request (built above) for coords.
         for (UUID riderId : joinedIds) {
             JoinRequest jr = acceptedByRequester.get(riderId);
             if (jr == null) continue;
@@ -1489,6 +1651,8 @@ public class RideService {
                 .createdAt(createdAt)
                 .departureTime(ride.getDepartureTime())
                 .yourSeats(yourSeats)
+                .tripDistanceKm(ride.getRouteDistanceKm())
+                .tripDurationMin(ride.getRouteDurationMin())
                 .host(host)
                 .seatsTotal(ride.getTotalSeats())
                 .seatsAvailable(seatsAvailable)

@@ -23,11 +23,51 @@ public class TrackingRestController {
 
     private final RideDriverLocationRepository driverLocationRepository;
     private final RidesClient ridesClient;
+    private final org.springframework.messaging.simp.SimpMessagingTemplate messagingTemplate;
 
     public TrackingRestController(RideDriverLocationRepository driverLocationRepository,
-                                  RidesClient ridesClient) {
+                                  RidesClient ridesClient,
+                                  org.springframework.messaging.simp.SimpMessagingTemplate messagingTemplate) {
         this.driverLocationRepository = driverLocationRepository;
         this.ridesClient = ridesClient;
+        this.messagingTemplate = messagingTemplate;
+    }
+
+    /** Body for the REST position push. */
+    public record LocationPush(String role, double lat, double lng, Double bearing) {
+    }
+
+    /**
+     * REST fallback for PUBLISHING a position — used by the driver app when
+     * the STOMP WebSocket can't connect (e.g. a proxy that blocks upgrades),
+     * so riders still get the car's location. Persists the driver's last-known
+     * spot and rebroadcasts on the live topic for any socket-connected member.
+     */
+    @PostMapping("/{rideId}")
+    public ResponseEntity<Void> publish(
+            @RequestHeader("X-User-Id") UUID userId,
+            @PathVariable("rideId") UUID rideId,
+            @RequestBody LocationPush body) {
+        if (body == null || !ridesClient.isMember(rideId, userId)) {
+            return ResponseEntity.status(403).build();
+        }
+        java.time.Instant now = java.time.Instant.now();
+        LocationUpdate out = new LocationUpdate(
+                userId, body.role(), body.lat(), body.lng(), body.bearing(), now);
+        try {
+            messagingTemplate.convertAndSend(
+                    TrackingController.TOPIC_PREFIX + rideId, out);
+        } catch (Exception ignored) {
+            // broadcast is best-effort; persistence below is what matters
+        }
+        if (body.role() != null && "DRIVER".equalsIgnoreCase(body.role())) {
+            try {
+                driverLocationRepository.save(new RideDriverLocation(
+                        rideId, userId, body.lat(), body.lng(), body.bearing(), now));
+            } catch (Exception ignored) {
+            }
+        }
+        return ResponseEntity.noContent().build();
     }
 
     /** The driver's last-known position for this ride, or 204 if none yet. */

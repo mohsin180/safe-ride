@@ -14,6 +14,9 @@ public interface RideParticipantsRepository extends JpaRepository<RideParticipan
 
     long countByRide_Id(UUID rideId);
 
+    /** Full participant rows (userId + seats) for fare weighting. */
+    List<RideParticipants> findByRide_Id(UUID rideId);
+
     boolean existsByRide_IdAndUserId(UUID rideId, UUID userId);
 
     java.util.Optional<RideParticipants> findByRide_IdAndUserId(UUID rideId, UUID userId);

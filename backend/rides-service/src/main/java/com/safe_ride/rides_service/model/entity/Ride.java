@@ -81,6 +81,12 @@ public class Ride {
      *  at creation time. Falls back to a distance/30 km/h estimate when routing
      *  is unavailable. Null only for legacy rides. */
     private Integer routeDurationMin;
+    /** The HOST's own solo leg (pickup→drop) captured at creation, BEFORE any
+     *  co-passenger detours reshape routeDistanceKm. Baseline for the pricing
+     *  cap: the host never pays more than this leg's solo fare. Null = legacy
+     *  ride (falls back to a Haversine estimate). */
+    private Double hostLegKm;
+    private Integer hostLegMin;
     /** When the host wants to leave. Null = on-demand ("leave now"); a future
      *  instant = a scheduled ride. Drives the "scheduled" badge, feed ordering,
      *  and lets riders plan ahead. */

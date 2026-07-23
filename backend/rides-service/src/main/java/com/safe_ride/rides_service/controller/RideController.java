@@ -6,6 +6,8 @@ import com.safe_ride.rides_service.model.dtos.CancelRideRequest;
 import com.safe_ride.rides_service.model.dtos.CreateRideRequest;
 import com.safe_ride.rides_service.model.dtos.DriverEarningsResponse;
 import com.safe_ride.rides_service.model.dtos.DriverRideHistoryResponse;
+import com.safe_ride.rides_service.model.dtos.HostAcceptFarePreviewResponse;
+import com.safe_ride.rides_service.model.dtos.JoinFarePreviewResponse;
 import com.safe_ride.rides_service.model.dtos.JoinRequestBody;
 import com.safe_ride.rides_service.model.dtos.PassengerRideHistoryResponse;
 import com.safe_ride.rides_service.model.dtos.PaymentResponse;
@@ -50,10 +52,32 @@ public class RideController {
             @RequestParam(required = false) Double lat,
             @RequestParam(required = false) Double lng,
             @RequestParam(required = false) Double dropLat,
-            @RequestParam(required = false) Double dropLng
+            @RequestParam(required = false) Double dropLng,
+            @RequestParam(required = false) Integer seats
     ) {
         return ResponseEntity.ok(
-                rideService.getAvailableRides(lat, lng, dropLat, dropLng));
+                rideService.getAvailableRides(lat, lng, dropLat, dropLng, seats));
+    }
+
+    /** TRUE fare preview for joining with a given route + seats. */
+    @GetMapping("/{id}/fare-preview")
+    @PreAuthorize("hasRole('PASSENGER')")
+    public ResponseEntity<JoinFarePreviewResponse> farePreview(
+            @PathVariable("id") UUID id,
+            @RequestParam double pickupLat, @RequestParam double pickupLng,
+            @RequestParam double dropLat, @RequestParam double dropLng,
+            @RequestParam(defaultValue = "1") int seats) {
+        return ResponseEntity.ok(rideService.previewJoinFare(
+                id, pickupLat, pickupLng, dropLat, dropLng, seats));
+    }
+
+    /** The host's before/after fare picture for a pending join request. */
+    @GetMapping("/{id}/join-requests/{requestId}/fare-preview")
+    @PreAuthorize("hasRole('PASSENGER')")
+    public ResponseEntity<HostAcceptFarePreviewResponse> acceptFarePreview(
+            @PathVariable("id") UUID id,
+            @PathVariable("requestId") UUID requestId) {
+        return ResponseEntity.ok(rideService.previewAcceptFare(id, requestId));
     }
 
     /** Host cancels their ride. Free before the driver arrives; a flat fee is
@@ -132,7 +156,7 @@ public class RideController {
     }
 
     @GetMapping("/{id}")
-    @PreAuthorize("hasRole('PASSENGER')")
+    @PreAuthorize("hasAnyRole('PASSENGER','DRIVER')")
     public ResponseEntity<RideDetailsResponse> getRideDetails(@PathVariable("id") UUID id) {
         return ResponseEntity.ok(rideService.getRideDetails(id));
     }
