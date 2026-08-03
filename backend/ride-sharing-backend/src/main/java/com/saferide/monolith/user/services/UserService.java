@@ -1,0 +1,103 @@
+package com.saferide.monolith.user.services;
+
+import com.saferide.monolith.user.exceptions.UserAlreadyExistException;
+import com.saferide.monolith.user.exceptions.UserNotFoundException;
+import com.saferide.monolith.user.model.UserMapper;
+import com.saferide.monolith.user.model.Users;
+import com.saferide.monolith.user.model.dtos.*;
+import com.saferide.monolith.user.repos.UserRepository;
+import com.saferide.monolith.user.security.JwtUtil;
+import org.apache.coyote.BadRequestException;
+import org.springframework.security.authentication.AuthenticationManager;
+import org.springframework.security.authentication.BadCredentialsException;
+import org.springframework.security.authentication.UsernamePasswordAuthenticationToken;
+import org.springframework.security.core.userdetails.UsernameNotFoundException;
+import org.springframework.security.crypto.password.PasswordEncoder;
+import org.springframework.stereotype.Service;
+
+import java.util.UUID;
+
+@Service
+public class UserService {
+    private final UserRepository userRepository;
+    private final UserMapper userMapper;
+    private final AuthenticationManager authenticationManager;
+    private final JwtUtil jwtUtil;
+    private final PasswordEncoder passwordEncoder;
+    private final EmailVerificationService verificationService;
+
+    public UserService(UserRepository userRepository, UserMapper userMapper, AuthenticationManager authenticationManager, JwtUtil jwtUtil, PasswordEncoder passwordEncoder, EmailVerificationService verificationService) {
+        this.userRepository = userRepository;
+        this.userMapper = userMapper;
+        this.authenticationManager = authenticationManager;
+        this.jwtUtil = jwtUtil;
+        this.passwordEncoder = passwordEncoder;
+        this.verificationService = verificationService;
+    }
+
+    public UserResponse register(RegisterRequest request) {
+        if (userRepository.existsByEmail(request.email())) {
+            throw new UserAlreadyExistException("User already exists");
+        }
+
+        Users user = userMapper.toUser(request);
+        user.setPassword(passwordEncoder.encode(request.password()));
+        userRepository.save(user);
+        verificationService.createAndSendVerification(user);
+        return userMapper.toResponse(user);
+    }
+
+    public LoginResponse login(LoginRequest request) throws BadRequestException {
+        try {
+            authenticationManager.authenticate(
+                    new UsernamePasswordAuthenticationToken(
+                            request.email(), request.password())
+            );
+        } catch (BadCredentialsException e) {
+            throw new BadCredentialsException("Invalid email or password");
+        }
+        Users users = userRepository.findByEmail(request.email())
+                .orElseThrow(() -> new UserNotFoundException("User Not Found"));
+
+        if (!users.isEnabled()) {
+            throw new UserNotFoundException("Account is disabled");
+        }
+        if (!users.isEmailVerified()) {
+            throw new UserNotFoundException("Please verify your email before logging in");
+        }
+        if (users.getRole() == null) {
+            throw new UserNotFoundException("Please select a role before logging in");
+        }
+
+        String token = jwtUtil.generateToken(
+                users.getId(), users.getRole().name(), users.getGender().name(), users.getEmail());
+
+        return LoginResponse.builder()
+                .token(token)
+                .build();
+    }
+
+    public LoginResponse selectRole(String id, RoleSelection request) {
+        Users users = userRepository.findById(UUID.fromString(id)).orElseThrow(
+                () -> new UsernameNotFoundException("User NotFound")
+        );
+        users.setRole(Role.valueOf(request.role()));
+        Users updatedUser = userRepository.save(users);
+        String token = jwtUtil.generateToken(
+                updatedUser.getId(),
+                updatedUser.getRole().name(),
+                updatedUser.getGender().name(),
+                updatedUser.getEmail()
+        );
+        return LoginResponse.builder()
+                .token(token)
+                .build();
+    }
+
+    public boolean isEmailVerified(String id) {
+        Users users = userRepository.findById(UUID.fromString(id)).orElseThrow(
+                () -> new UserNotFoundException("user not found")
+        );
+        return users.isEmailVerified();
+    }
+}

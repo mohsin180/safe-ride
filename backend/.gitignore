@@ -3,3 +3,9 @@
 .env
 .env.local
 .env.*.local
+
+# Build output
+target/
+
+# OS files
+.DS_Store

@@ -2,9 +2,25 @@
 
 This file provides guidance to Claude Code (claude.ai/code) when working with code in this repository.
 
-## Repo layout
+## ACTIVE ARCHITECTURE: the monolith (`ride-sharing-backend/`)
 
-This is a multi-module Spring Boot microservices project for a ride-sharing app. Each module is an independent Maven project (no parent POM at the root) with its own `mvnw`/`pom.xml`:
+**As of Aug 2026 the backend is a single Spring Boot monolith** in `ride-sharing-backend/` (Boot 4.0.6, Java 17, package `com.saferide.monolith`). The old microservice modules were moved out of this repo to `/Users/novaratech/Documents/projects/microservices/` (with their own `run.sh`, `.env` copy, and `.vscode/launch.json`); the LEGACY section below documents how they worked.
+
+- Run it: `./run.sh` (defaults to monolith; loads `.env`). Or `cd ride-sharing-backend && ../load-env.sh`-style env + `./mvnw spring-boot:run`.
+- One port **8080**, same `/api/v1/**` paths as the old gateway → the Flutter app needs no changes.
+- One database `saferide_db` (env `DB_NAME`; host/creds from the same `DB_*` vars — currently **local Homebrew Postgres 16** on localhost; the old Neon values are commented in `.env`). All 23 tables from every module live here. Legacy per-service DBs (`user_db` etc.) are untouched.
+- Modules are packages: `user` (auth), `profile`, `rides`, `messaging` (WebSocket chat), `notification`, plus `common/security`.
+- Security: `common/security/JwtAuthFilter` validates the Bearer JWT, sets the `SecurityContext` (with `UserContext` in details) **and** rewrites `X-User-Id/-Role/-Gender/-Email` request headers from token claims — so controllers using `@RequestHeader("X-User-Id")` and the WS handshake interceptor work unchanged, and client-sent identity headers can never be spoofed. Public paths: `/api/v1/auth/**` only. There is no gateway and no config-server.
+- Former Feign/RestClient inter-service calls are now in-process facades with the same class names/signatures: `rides/client/ProfileClient` + `DriverClient` and `messaging/client/RidesClient` + `ProfileClient` call the other module's repositories directly. The `/internal/**` HTTP endpoints were deleted.
+- RabbitMQ is gone: `rides/event/NotificationPublisher` publishes `RideNotificationEvent` via Spring's `ApplicationEventPublisher`; `notification/listener/NotificationListener` consumes it with `@Async @EventListener` (`@EnableAsync` on `MonolithApplication`).
+- The three exception advices were renamed (`UserExceptionHandler`, `ProfileExceptionHandler`, `RidesExceptionHandler`) and the two `ProfileClient` beans have explicit names (`ridesProfileClient`, `messagingProfileClient`) to avoid bean-name clashes.
+- JWT signing + validation now share the single `jwt.secret` property — the old gateway/user-services secret-sync issue no longer exists.
+
+---
+
+## LEGACY: the original microservices (moved to /Users/novaratech/Documents/projects/microservices/)
+
+The original architecture was a multi-module Spring Boot microservices project. Each module is an independent Maven project (no parent POM at the root) with its own `mvnw`/`pom.xml`:
 
 - `config-server/` — Spring Cloud Config Server (port **8888**, profile `native`, serves YAML from `src/main/resources/config/`).
 - `api-gateway/` — Spring Cloud Gateway on **WebFlux** (port **8080**). The single public entry point.
