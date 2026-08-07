@@ -17,8 +17,13 @@ public class PricingProperties {
     private double perKm = 20.0;
     /** Charge per minute of trip duration. */
     private double perMin = 2.0;
-    /** Fraction (0..1) knocked off the gross when a ride is shared (>1 seat). */
-    private double sharedDiscountRate = 0.20;
+    /**
+     * Surcharge per EXTRA seat a rider books, as a fraction of their own
+     * share. Booking 3 seats costs {@code share * (1 + 2 * rate)}. The trip
+     * costs the same to drive however many seats one rider takes, but holding
+     * seats empty stops anyone else joining — this prices that in.
+     */
+    private double seatSurchargeRate = 0.15;
     /** Gross multiplier applied to PREMIUM rides. */
     private double premiumMultiplier = 1.5;
     /** Floor the gross trip fare never drops below. */
@@ -63,12 +68,12 @@ public class PricingProperties {
         this.perMin = perMin;
     }
 
-    public double getSharedDiscountRate() {
-        return sharedDiscountRate;
+    public double getSeatSurchargeRate() {
+        return seatSurchargeRate;
     }
 
-    public void setSharedDiscountRate(double sharedDiscountRate) {
-        this.sharedDiscountRate = sharedDiscountRate;
+    public void setSeatSurchargeRate(double seatSurchargeRate) {
+        this.seatSurchargeRate = seatSurchargeRate;
     }
 
     public double getPremiumMultiplier() {

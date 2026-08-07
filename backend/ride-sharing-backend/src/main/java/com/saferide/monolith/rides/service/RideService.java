@@ -8,6 +8,7 @@ import com.saferide.monolith.rides.client.RouteResult;
 import com.saferide.monolith.rides.client.RoutingClient;
 import com.saferide.monolith.rides.config.PricingProperties;
 import com.saferide.monolith.common.security.UserContext;
+import com.saferide.monolith.kyc.service.KycGuard;
 import com.saferide.monolith.rides.model.dtos.CancellationResult;
 import com.saferide.monolith.rides.model.dtos.HostAcceptFarePreviewResponse;
 import com.saferide.monolith.rides.model.dtos.JoinFarePreviewResponse;
@@ -107,6 +108,7 @@ public class RideService {
     private final DriverClient driverClient;
     private final RoutingClient routingClient;
     private final NotificationPublisher notificationPublisher;
+    private final KycGuard kycGuard;
 
     public RideService(RideRepository rideRepository,
                        RideParticipantsRepository rideParticipantsRepository,
@@ -126,7 +128,9 @@ public class RideService {
                        ProfileClient profileClient,
                        DriverClient driverClient,
                        RoutingClient routingClient,
-                       NotificationPublisher notificationPublisher) {
+                       NotificationPublisher notificationPublisher,
+                       KycGuard kycGuard) {
+        this.kycGuard = kycGuard;
         this.rideRepository = rideRepository;
         this.rideParticipantsRepository = rideParticipantsRepository;
         this.rideDepartureRepository = rideDepartureRepository;
@@ -161,6 +165,7 @@ public class RideService {
         if (!"PASSENGER".equals(ctx.role())) {
             throw new RoleNotAllowedException("Only passengers can request a ride.");
         }
+        kycGuard.requireVerified(ctx, "request a ride");
 
         // One ride at a time: can't create if you already host OR joined one.
         if (rideRepository.hasActiveRideOrJoined(ctx.userId())) {
@@ -549,6 +554,7 @@ public class RideService {
     @Transactional
     public void requestToJoin(UUID rideId, JoinRequestBody body) {
         UserContext ctx = getCurrentUserContext();
+        kycGuard.requireVerified(ctx, "join a ride");
         UUID userId = ctx.userId();
 
         Ride ride = rideRepository.findById(rideId)
@@ -1012,6 +1018,7 @@ public class RideService {
     @Transactional
     public void offerToDrive(UUID rideId) {
         UserContext ctx = requireDriver();
+        kycGuard.requireVerified(ctx, "offer to drive");
         UUID driverId = ctx.userId();
 
         Ride ride = rideRepository.findById(rideId)

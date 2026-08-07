@@ -14,4 +14,6 @@ public class DriverProfileResponse{
     private  String gender;
     private LocalDateTime createdAt;
     private VehicleResponse vehicle;
+    /** Didit KYC state (NOT_STARTED / IN_PROGRESS / IN_REVIEW / APPROVED / DECLINED). */
+    private String kycStatus;
 }

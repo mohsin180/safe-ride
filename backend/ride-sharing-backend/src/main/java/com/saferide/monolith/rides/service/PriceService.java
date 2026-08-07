@@ -118,7 +118,13 @@ public class PriceService {
         // Weights: host first, then each participant by their own leg.
         Map<UUID, Double> weights = new LinkedHashMap<>();
         double hostLeg = Math.max(0.1, hostLegKm(ride));
-        weights.put(hostId, hostLeg * Math.max(1, ride.getHostSeats()));
+        int hostSeats = Math.max(1, ride.getHostSeats());
+        weights.put(hostId, hostLeg * hostSeats);
+
+        // Seats each rider occupies, kept alongside the weights so the
+        // extra-seat surcharge can be applied per rider at the end.
+        Map<UUID, Integer> seatsByRider = new LinkedHashMap<>();
+        seatsByRider.put(hostId, hostSeats);
 
         Map<UUID, JoinRequest> accepted = new HashMap<>();
         for (JoinRequest jr : joinRequestRepository
@@ -136,10 +142,12 @@ public class PriceService {
             }
             int seats = p.getSeats() > 0 ? p.getSeats() : 1;
             weights.put(p.getUserId(), leg * seats);
+            seatsByRider.put(p.getUserId(), seats);
         }
         if (candidateKey != null) {
-            weights.put(candidateKey,
-                    Math.max(0.1, candidateLegKm) * Math.max(1, candidateSeats));
+            int seats = Math.max(1, candidateSeats);
+            weights.put(candidateKey, Math.max(0.1, candidateLegKm) * seats);
+            seatsByRider.put(candidateKey, seats);
         }
 
         double totalW = weights.values().stream().mapToDouble(Double::doubleValue).sum();
@@ -177,7 +185,27 @@ public class PriceService {
         }
         shares.merge(largest, round2(gross - sum), Double::sum);
         shares.put(largest, round2(shares.get(largest)));
+
+        // Extra-seat surcharge, applied last so it rides on top of a split
+        // that already sums to the gross. Driving the trip costs the same
+        // whether one rider takes one seat or three, but the held seats stop
+        // anyone else joining — so the total ends up ABOVE the gross, and
+        // tripFare() sums the shares rather than returning the gross.
+        applySeatSurcharge(shares, seatsByRider);
         return shares;
+    }
+
+    private void applySeatSurcharge(Map<UUID, Double> shares, Map<UUID, Integer> seatsByRider) {
+        double rate = props.getSeatSurchargeRate();
+        if (rate <= 0) {
+            return;
+        }
+        for (Map.Entry<UUID, Double> e : shares.entrySet()) {
+            int extraSeats = Math.max(0, seatsByRider.getOrDefault(e.getKey(), 1) - 1);
+            if (extraSeats > 0) {
+                shares.put(e.getKey(), round2(e.getValue() * (1 + rate * extraSeats)));
+            }
+        }
     }
 
     /**
@@ -234,7 +262,11 @@ public class PriceService {
         if (ride.getPickup() == null || ride.getDestination() == null) {
             return 0.0;
         }
-        return round2(gross(ride));
+        // Sum of the shares, not the bare gross: extra-seat surcharges are
+        // real money the riders hand over, so the driver's earnings have to
+        // include them.
+        return round2(computeShares(ride).values().stream()
+                .mapToDouble(Double::doubleValue).sum());
     }
 
     /** Number of riders splitting the fare: the host plus every joined

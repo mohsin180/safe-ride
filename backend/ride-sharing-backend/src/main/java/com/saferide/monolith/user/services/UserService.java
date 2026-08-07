@@ -1,7 +1,9 @@
 package com.saferide.monolith.user.services;
 
+import com.saferide.monolith.user.exceptions.InvalidOnboardingTokenException;
 import com.saferide.monolith.user.exceptions.UserAlreadyExistException;
 import com.saferide.monolith.user.exceptions.UserNotFoundException;
+import io.jsonwebtoken.JwtException;
 import com.saferide.monolith.user.model.UserMapper;
 import com.saferide.monolith.user.model.Users;
 import com.saferide.monolith.user.model.dtos.*;
@@ -44,7 +46,11 @@ public class UserService {
         user.setPassword(passwordEncoder.encode(request.password()));
         userRepository.save(user);
         verificationService.createAndSendVerification(user);
-        return userMapper.toResponse(user);
+        UserResponse mapped = userMapper.toResponse(user);
+        // The client persists this so it can still finish onboarding after the
+        // app is killed while the user is away verifying their email.
+        return new UserResponse(mapped.id(), mapped.email(),
+                jwtUtil.generateOnboardingToken(user.getId()));
     }
 
     public LoginResponse login(LoginRequest request) throws BadRequestException {
@@ -66,7 +72,15 @@ public class UserService {
             throw new UserNotFoundException("Please verify your email before logging in");
         }
         if (users.getRole() == null) {
-            throw new UserNotFoundException("Please select a role before logging in");
+            // Not an error: the credentials were right, onboarding just isn't
+            // finished. Handing back the id and an onboarding token is the only
+            // way a user whose app died mid-signup can ever pick a role — the
+            // id is otherwise only returned by /register, which won't repeat.
+            return LoginResponse.builder()
+                    .userId(users.getId())
+                    .roleRequired(true)
+                    .onboardingToken(jwtUtil.generateOnboardingToken(users.getId()))
+                    .build();
         }
 
         String token = jwtUtil.generateToken(
@@ -77,8 +91,21 @@ public class UserService {
                 .build();
     }
 
-    public LoginResponse selectRole(String id, RoleSelection request) {
-        Users users = userRepository.findById(UUID.fromString(id)).orElseThrow(
+    /**
+     * Sets the caller's role and issues their first real token. The user is
+     * taken from the signed onboarding token rather than a path parameter —
+     * the old {@code /{id}/select-role} was public and trusted the id as-is,
+     * so anyone holding a stranger's UUID could set their role.
+     */
+    public LoginResponse selectRole(String onboardingToken, RoleSelection request) {
+        UUID userId;
+        try {
+            userId = jwtUtil.parseOnboardingToken(onboardingToken);
+        } catch (JwtException | IllegalArgumentException e) {
+            throw new InvalidOnboardingTokenException(
+                    "Your signup session expired. Please log in to continue.");
+        }
+        Users users = userRepository.findById(userId).orElseThrow(
                 () -> new UsernameNotFoundException("User NotFound")
         );
         users.setRole(Role.valueOf(request.role()));

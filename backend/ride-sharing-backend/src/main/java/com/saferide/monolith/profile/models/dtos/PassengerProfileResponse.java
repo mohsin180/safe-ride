@@ -14,4 +14,6 @@ public class PassengerProfileResponse {
     private String email;
     private String gender;
     private LocalDateTime createdAt;
+    /** Didit KYC state (NOT_STARTED / IN_PROGRESS / IN_REVIEW / APPROVED / DECLINED). */
+    private String kycStatus;
 }

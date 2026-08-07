@@ -63,7 +63,9 @@ pricing:
   base-fare: ${PRICE_BASE_FARE:50}
   per-km: ${PRICE_PER_KM:20}
   per-min: ${PRICE_PER_MIN:2}
-  shared-discount-rate: ${PRICE_SHARED_DISCOUNT:0.20}
+  # Extra seats a rider holds cost 15% of their share each: the trip costs the
+  # same to drive, but blocked seats stop anyone else joining.
+  seat-surcharge-rate: ${PRICE_SEAT_SURCHARGE:0.15}
   premium-multiplier: ${PRICE_PREMIUM_MULTIPLIER:1.5}
   min-fare: ${PRICE_MIN_FARE:80}
   currency: ${PRICE_CURRENCY:PKR}
@@ -73,3 +75,20 @@ pricing:
 geoapify:
   api-key: ${GEOAPIFY_KEY:}
   routing-url: ${GEOAPIFY_ROUTING_URL:https://api.geoapify.com/v1/routing}
+
+# Didit identity verification (KYC: CNIC scan + liveness + face match).
+# The workflow-id is per-session config, not a secret. IMPORTANT: workflow ids
+# are per-ENVIRONMENT — a Sandbox key cannot use a Live workflow id (Didit
+# answers "Invalid workflow_id."), so DIDIT_API_KEY and DIDIT_WORKFLOW_ID must
+# always be changed together. The default below is the Sandbox "Free KYC"
+# workflow; the Live one is 9ebecab1-a0b7-4002-aff7-a44da36bcd00.
+didit:
+  api-key: ${DIDIT_API_KEY:}
+  base-url: ${DIDIT_BASE_URL:https://verification.didit.me}
+  workflow-id: ${DIDIT_WORKFLOW_ID:2512b442-6d86-4a1c-829d-6cb77da3c8f1}
+  # Compare the scanned document against the account (gender, CNIC number,
+  # age, expiry). Always on for live documents; off in sandbox, because
+  # sandbox returns one fixed synthetic document ("Gustavo Matsumoto",
+  # Brazilian passport) that can never match a real CNIC and would reject
+  # every user. Turn on to demonstrate the mismatch rejection in sandbox.
+  enforce-document-match: ${DIDIT_ENFORCE_DOCUMENT_MATCH:false}

@@ -37,11 +37,24 @@ public class UserController {
         return ResponseEntity.ok(login);
     }
 
-    @PostMapping("/{id}/select-role")
-    public ResponseEntity<LoginResponse> selectRole(@PathVariable String id,
-                                                    @Valid @RequestBody RoleSelection role) {
-        LoginResponse response = userService.selectRole(id, role);
+    /**
+     * Finishes signup. Authorised by the onboarding token from /register or
+     * from a login that reported {@code roleRequired} — not by a user id in
+     * the URL, which anyone could supply.
+     */
+    @PostMapping("/select-role")
+    public ResponseEntity<LoginResponse> selectRole(
+            @RequestHeader(value = "Authorization", required = false) String authorization,
+            @Valid @RequestBody RoleSelection role) {
+        LoginResponse response = userService.selectRole(stripBearer(authorization), role);
         return ResponseEntity.ok(response);
+    }
+
+    private String stripBearer(String authorization) {
+        if (authorization == null) {
+            return "";
+        }
+        return authorization.startsWith("Bearer ") ? authorization.substring(7).trim() : authorization.trim();
     }
 
     @GetMapping(value = "/verify-email", produces = MediaType.TEXT_HTML_VALUE)

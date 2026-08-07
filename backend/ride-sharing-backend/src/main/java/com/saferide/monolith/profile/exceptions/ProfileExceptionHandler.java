@@ -1,17 +1,13 @@
 package com.saferide.monolith.profile.exceptions;
 
+import org.springframework.core.annotation.Order;
 import org.springframework.http.HttpStatus;
 import org.springframework.http.ResponseEntity;
-import org.springframework.validation.BindingResult;
-import org.springframework.validation.FieldError;
-import org.springframework.web.bind.MethodArgumentNotValidException;
 import org.springframework.web.bind.annotation.ExceptionHandler;
 import org.springframework.web.bind.annotation.RestControllerAdvice;
 
-import java.util.HashMap;
-import java.util.List;
-import java.util.Map;
 
+@Order(2)
 @RestControllerAdvice
 public class ProfileExceptionHandler {
 
@@ -27,22 +23,11 @@ public class ProfileExceptionHandler {
         return new ResponseEntity<>(errorResponse, HttpStatus.NOT_FOUND);
     }
 
-    @ExceptionHandler(MethodArgumentNotValidException.class)
-    public ResponseEntity<Map<String, String>> MethodArgumentNotValidException(MethodArgumentNotValidException ex) {
-        Map<String, String> errorResponse = new HashMap<>();
-        BindingResult bindingResult = ex.getBindingResult();
-        List<FieldError> errorList = bindingResult.getFieldErrors();
-        for (FieldError fielderror : errorList) {
-            errorResponse.put(fielderror.getField(), fielderror.getDefaultMessage());
-        }
-        return new ResponseEntity<>(errorResponse, HttpStatus.FORBIDDEN);
-    }
+    // Bean-validation is handled once, in UserExceptionHandler — this copy
+    // also returned the wrong status (403 for a malformed body).
 
-    @ExceptionHandler(RuntimeException.class)
-    public ResponseEntity<ErrorResponse> runTimeException(RuntimeException ex) {
-        ErrorResponse errorResponse = new ErrorResponse(HttpStatus.INTERNAL_SERVER_ERROR.value(), ex.getMessage());
-        return new ResponseEntity<>(errorResponse, HttpStatus.INTERNAL_SERVER_ERROR);
-    }
+    // No catch-all here on purpose — see the note in UserExceptionHandler.
+    // The single fallback lives in RidesExceptionHandler, ordered last.
 
     @ExceptionHandler(RoleNotAllowedException.class)
     public ResponseEntity<ErrorResponse> roleNotAllowedException(RoleNotAllowedException ex) {

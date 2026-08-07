@@ -1,27 +1,32 @@
 package com.saferide.monolith.rides.exceptions;
 
+import com.saferide.monolith.kyc.exceptions.KycRequiredException;
+import org.slf4j.Logger;
+import org.slf4j.LoggerFactory;
+import org.springframework.core.Ordered;
+import org.springframework.core.annotation.Order;
 import org.springframework.http.HttpStatus;
 import org.springframework.http.ResponseEntity;
 import org.springframework.orm.ObjectOptimisticLockingFailureException;
 import org.springframework.security.access.AccessDeniedException;
 import org.springframework.security.core.AuthenticationException;
-import org.springframework.web.bind.MethodArgumentNotValidException;
 import org.springframework.web.bind.annotation.ExceptionHandler;
 import org.springframework.web.bind.annotation.RestControllerAdvice;
 
-import java.util.stream.Collectors;
 
+/**
+ * Also holds the application's single catch-all, hence the explicit ordering:
+ * Spring stops at the first advice with an applicable handler, so an unordered
+ * catch-all would shadow every other module's specific handlers.
+ */
+@Order(Ordered.LOWEST_PRECEDENCE)
 @RestControllerAdvice
 public class RidesExceptionHandler {
 
-    @ExceptionHandler(MethodArgumentNotValidException.class)
-    public ResponseEntity<ErrorResponse> handleValidation(MethodArgumentNotValidException ex) {
-        String message = ex.getBindingResult().getFieldErrors().stream()
-                .map(err -> err.getField() + " " + err.getDefaultMessage())
-                .collect(Collectors.joining("; "));
-        return ResponseEntity.status(HttpStatus.BAD_REQUEST)
-                .body(new ErrorResponse(message.isBlank() ? "Invalid request body" : message));
-    }
+    private static final Logger log = LoggerFactory.getLogger(RidesExceptionHandler.class);
+
+    // Bean-validation is handled once, in UserExceptionHandler, which now
+    // includes the same joined text under a "message" key.
 
     @ExceptionHandler(IllegalArgumentException.class)
     public ResponseEntity<ErrorResponse> handleIllegalArgument(IllegalArgumentException ex) {
@@ -43,6 +48,17 @@ public class RidesExceptionHandler {
 
     @ExceptionHandler(ForbiddenException.class)
     public ResponseEntity<ErrorResponse> handleForbidden(ForbiddenException ex) {
+        return ResponseEntity.status(HttpStatus.FORBIDDEN)
+                .body(new ErrorResponse(ex.getMessage()));
+    }
+
+    /**
+     * Handled here rather than in a new advice: every KYC-gated action lives
+     * in the rides module, and adding an advice with its own catch-all would
+     * make the resolution order between advices matter.
+     */
+    @ExceptionHandler(KycRequiredException.class)
+    public ResponseEntity<ErrorResponse> handleKycRequired(KycRequiredException ex) {
         return ResponseEntity.status(HttpStatus.FORBIDDEN)
                 .body(new ErrorResponse(ex.getMessage()));
     }
@@ -75,6 +91,9 @@ public class RidesExceptionHandler {
 
     @ExceptionHandler(Exception.class)
     public ResponseEntity<ErrorResponse> handleAny(Exception ex) {
+        // The only place an unexpected failure is logged now that the
+        // per-module catch-alls are gone — without this they'd vanish.
+        log.error("Unhandled exception", ex);
         return ResponseEntity.status(HttpStatus.INTERNAL_SERVER_ERROR)
                 .body(new ErrorResponse("Server error. Please try again later."));
     }
