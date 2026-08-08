@@ -1,6 +1,7 @@
 package com.saferide.monolith.profile.service;
 
 import com.saferide.monolith.common.security.UserContext;
+import com.saferide.monolith.kyc.service.KycIdentityWatch;
 import com.saferide.monolith.profile.exceptions.ProfileAlreadyExistsException;
 import com.saferide.monolith.profile.exceptions.ProfileNotFoundException;
 import com.saferide.monolith.profile.exceptions.RoleNotAllowedException;
@@ -66,7 +67,11 @@ public class PassengerProfileService {
         if (profile == null) {
             throw new ProfileNotFoundException("Passenger profile not found");
         }
+        String previousCnic = profile.getCnic();
+        String previousName = profile.getFullName();
         mapper.updatePassenger(request, profile);
+        // A verified badge belongs to the identity it was issued for.
+        KycIdentityWatch.resetIfIdentityChanged(profile, previousCnic, previousName);
         PassengerProfile saved = passengerProfileRepository.save(profile);
         return mapper.toResponse(saved);
     }

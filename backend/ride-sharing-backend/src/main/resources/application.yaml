@@ -21,12 +21,13 @@ spring:
       ddl-auto: ${JPA_DDL_AUTO:update}   # options: validate, update, create, create-drop
     database-platform: org.hibernate.dialect.PostgreSQLDialect
 
-  # Email verification + password reset (from user-services).
+  # Only used when mail.provider=smtp (see the `mail:` block below). Blank
+  # defaults so the app still starts when everything goes through Brevo's API.
   mail:
-    host: ${MAIL_HOST:smtp.gmail.com}
+    host: ${MAIL_HOST:smtp-relay.brevo.com}
     port: ${MAIL_PORT:587}
-    username: ${MAIL_USERNAME}
-    password: ${MAIL_PASSWORD}
+    username: ${MAIL_USERNAME:}
+    password: ${MAIL_PASSWORD:}
     properties:
       mail:
         smtp:
@@ -44,6 +45,19 @@ jwt:
   # secret sync between user-services and api-gateway.
   secret: ${JWT_SECRET}
   expiration: ${JWT_EXPIRATION:86400000}
+
+# Outgoing mail (verification + password reset).
+mail:
+  # brevo = Brevo's HTTP API (default, no SMTP port needed).
+  # smtp  = any SMTP server, including Brevo's relay — then fill spring.mail.*
+  provider: ${MAIL_PROVIDER:brevo}
+  # Must be a sender Brevo has verified, or every send is rejected with
+  # "sender not valid".
+  from-email: ${MAIL_FROM_EMAIL:}
+  from-name: ${MAIL_FROM_NAME:SafeRide}
+  brevo:
+    api-key: ${BREVO_API_KEY:}
+    base-url: ${BREVO_BASE_URL:https://api.brevo.com}
 
 app:
   verification:

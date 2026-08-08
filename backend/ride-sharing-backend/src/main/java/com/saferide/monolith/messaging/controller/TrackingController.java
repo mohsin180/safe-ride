@@ -50,16 +50,20 @@ public class TrackingController {
         if (!ridesClient.isMember(rideId, userId)) {
             return;
         }
+        // The role comes from the ride's assignment, never from the payload —
+        // a co-passenger sending role:"DRIVER" would otherwise overwrite the
+        // car's position for everyone watching.
+        boolean isDriver = ridesClient.isAssignedDriver(rideId, userId);
         Instant now = Instant.now();
         LocationUpdate out = new LocationUpdate(
-                userId, payload.role(), payload.lat(), payload.lng(),
+                userId, isDriver ? "DRIVER" : "RIDER", payload.lat(), payload.lng(),
                 payload.bearing(), now);
         messagingTemplate.convertAndSend(TOPIC_PREFIX + rideId, out);
 
         // Persist the driver's last-known spot so a rider who opens the app
         // late (or missed the live frames) can be shown the car immediately.
         // Best-effort — a storage hiccup must never break the live relay.
-        if (payload.role() != null && "DRIVER".equalsIgnoreCase(payload.role())) {
+        if (isDriver) {
             try {
                 driverLocationRepository.save(new RideDriverLocation(
                         rideId, userId, payload.lat(), payload.lng(),

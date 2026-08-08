@@ -1,6 +1,7 @@
 package com.saferide.monolith.user.services;
 
 import com.saferide.monolith.user.exceptions.InvalidTokenException;
+import com.saferide.monolith.user.security.AttemptLimiter;
 import com.saferide.monolith.user.model.PasswordResetToken;
 import com.saferide.monolith.user.model.Users;
 import com.saferide.monolith.user.repos.PasswordResetTokenRepo;
@@ -23,6 +24,7 @@ public class PasswordResetService {
     private final PasswordResetTokenRepo tokenRepo;
     private final MailService mailService;
     private final PasswordEncoder passwordEncoder;
+    private final AttemptLimiter attemptLimiter;
 
     @Value("${app.reset.token-expiry-hours}")
     private int tokenExpiryHours;
@@ -30,11 +32,13 @@ public class PasswordResetService {
     public PasswordResetService(UserRepository userRepository,
                                 PasswordResetTokenRepo tokenRepo,
                                 MailService mailService,
-                                PasswordEncoder passwordEncoder) {
+                                PasswordEncoder passwordEncoder,
+                                AttemptLimiter attemptLimiter) {
         this.userRepository = userRepository;
         this.tokenRepo = tokenRepo;
         this.mailService = mailService;
         this.passwordEncoder = passwordEncoder;
+        this.attemptLimiter = attemptLimiter;
     }
 
     /**
@@ -44,6 +48,9 @@ public class PasswordResetService {
      */
     @Transactional
     public void createAndSendResetLink(String email) {
+        // Unbounded, this endpoint could flood an inbox and burn the app's
+        // SMTP quota; the address is the natural budget key.
+        attemptLimiter.check("request a password reset", email);
         Optional<Users> maybeUser = userRepository.findByEmail(email);
         if (maybeUser.isEmpty()) {
             log.info("Password reset requested for unknown email — ignoring silently");

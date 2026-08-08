@@ -18,7 +18,13 @@ public class Users {
     @Id
     @GeneratedValue(strategy = GenerationType.UUID)
     private UUID id;
-    @Column(nullable = false)
+    /**
+     * Unique at the database, not just via the {@code existsByEmail} check in
+     * {@code UserService.register} — two concurrent registrations both passed
+     * that check, and the duplicate rows then made {@code findByEmail} throw
+     * on every subsequent login for that address.
+     */
+    @Column(nullable = false, unique = true)
     private String email;
     @Column(nullable = false)
     private String password;

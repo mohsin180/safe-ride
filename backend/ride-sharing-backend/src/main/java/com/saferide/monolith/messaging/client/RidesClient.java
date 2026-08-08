@@ -53,6 +53,19 @@ public class RidesClient {
                 && members.memberIds().contains(userId);
     }
 
+    /**
+     * True only for the driver actually assigned to this ride. Live-tracking
+     * writes are keyed on the ride, so any member who claimed
+     * {@code role: "DRIVER"} could overwrite the real car's position and show
+     * every rider a vehicle that isn't there.
+     */
+    @Transactional(readOnly = true)
+    public boolean isAssignedDriver(UUID rideId, UUID userId) {
+        return rideRepository.findById(rideId)
+                .map(r -> r.getDriverId() != null && r.getDriverId().equals(userId))
+                .orElse(false);
+    }
+
     private RideMembers toMembers(Ride ride) {
         List<UUID> memberIds = new ArrayList<>();
         memberIds.add(ride.getCreatedByUserId());

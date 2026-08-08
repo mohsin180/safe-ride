@@ -65,6 +65,7 @@ import org.springframework.security.core.context.SecurityContextHolder;
 import org.springframework.stereotype.Service;
 import org.springframework.transaction.annotation.Transactional;
 
+import java.time.Duration;
 import java.time.Instant;
 import java.time.LocalDate;
 import java.time.OffsetDateTime;
@@ -82,6 +83,29 @@ import java.util.stream.Collectors;
 @Service
 public class RideService {
     /** Only rides whose pickup is within this many km of the rider are shown. */
+    /** A departure this far in the past still counts as "leave now" — covers
+     *  a slow submit or a slightly-off device clock instead of erroring. */
+    /** Assumed city speed when no routed duration is available (km/h). */
+    private static final double FALLBACK_SPEED_KMPH = 30.0;
+
+    private static final Duration DEPARTURE_GRACE = Duration.ofMinutes(5);
+
+    /** Matches the 30-day cap the app's date picker offers, so the API can't
+     *  be talked into a ride years away that would sit in the feed forever. */
+    private static final Duration MAX_SCHEDULE_AHEAD = Duration.ofDays(30);
+
+    /**
+     * How close to departure a scheduled ride becomes claimable by drivers.
+     * The driver feed answers "what can I drive now", so a ride leaving next
+     * week must stay out of it — accepting one would tie up the driver's
+     * single active-ride slot for days. Passengers still see scheduled rides
+     * in the browse feed, since planning ahead is the point of sharing.
+     */
+    private static final Duration DRIVER_FEED_LEAD_TIME = Duration.ofHours(2);
+
+    /** How far a co-passenger's stop may sit from the ride's own endpoints. */
+    private static final double JOIN_DETOUR_LIMIT_KM = 25.0;
+
     private static final double SEARCH_RADIUS_KM = 5.0;
     /** Drivers cover more ground, so their feed uses a wider catchment. */
     private static final double DRIVER_SEARCH_RADIUS_KM = 10.0;
@@ -160,6 +184,9 @@ public class RideService {
         return ids;
     }
 
+    // Transactional so the one-ride-at-a-time check and the insert that
+    // depends on it can't be split across two connections.
+    @Transactional
     public RideResponse createRide(CreateRideRequest request) {
         UserContext ctx = getCurrentUserContext();
         if (!"PASSENGER".equals(ctx.role())) {
@@ -189,11 +216,25 @@ public class RideService {
         // NOT auto-published: the host decides when the ride goes to the
         // driver feed via the "Publish to drivers" button — e.g. after
         // gathering co-passengers first.
-        // Scheduled ride: keep a departure time only if it's genuinely in the
-        // future; a null or past time means "leave now" (on-demand).
-        if (request.departureTime() != null
-                && request.departureTime().isAfter(Instant.now())) {
-            ride.setDepartureTime(request.departureTime());
+        // Scheduled ride. A clearly-past or absurdly-distant time is rejected
+        // rather than dropped: silently storing null let a client believe it
+        // had scheduled a ride that was actually created as on-demand.
+        if (request.departureTime() != null) {
+            Instant now = Instant.now();
+            if (request.departureTime().isBefore(now.minus(DEPARTURE_GRACE))) {
+                throw new IllegalArgumentException(
+                        "Departure time is in the past — pick a future time or leave now.");
+            }
+            if (request.departureTime().isAfter(now.plus(MAX_SCHEDULE_AHEAD))) {
+                throw new IllegalArgumentException(
+                        "Rides can only be scheduled up to "
+                                + MAX_SCHEDULE_AHEAD.toDays() + " days ahead.");
+            }
+            // Within the grace window counts as "leave now", so a slow submit
+            // on a just-now time doesn't fail.
+            if (request.departureTime().isAfter(now)) {
+                ride.setDepartureTime(request.departureTime());
+            }
         }
 
         // Resolve & persist the trip's road distance/duration so pricing is
@@ -368,12 +409,22 @@ public class RideService {
         ordered.add(cursor);
         cursor = drainNearest(cursor, new ArrayList<>(pickups.subList(1, pickups.size())), ordered);
         drainNearest(cursor, new ArrayList<>(drops), ordered);
-        double km = 0.0;
-        for (int i = 1; i < ordered.size(); i++) {
-            km += priceService.distanceKm(ordered.get(i - 1)[0], ordered.get(i - 1)[1],
-                    ordered.get(i)[0], ordered.get(i)[1]);
-        }
-        return new double[]{km, (km / 30.0) * 60.0};
+        // Price the preview off the SAME road route the accept path stamps on
+        // the ride. Quoting a straight-line distance while charging the routed
+        // one meant the fare a rider agreed to was routinely 20-40% under what
+        // they were later billed. Haversine stays as the fallback for when the
+        // routing key is absent or the call fails, exactly as in pricing.
+        return routingClient.routeThrough(ordered)
+                .map(r -> new double[]{r.distanceKm(), r.durationMin()})
+                .orElseGet(() -> {
+                    double km = 0.0;
+                    for (int i = 1; i < ordered.size(); i++) {
+                        km += priceService.distanceKm(
+                                ordered.get(i - 1)[0], ordered.get(i - 1)[1],
+                                ordered.get(i)[0], ordered.get(i)[1]);
+                    }
+                    return new double[]{km, (km / FALLBACK_SPEED_KMPH) * 60.0};
+                });
     }
 
     /** Sentinel key for the candidate rider inside a shares preview. */
@@ -385,8 +436,17 @@ public class RideService {
             double pickupLng, double dropLat, double dropLng, int seats) {
         Ride ride = rideRepository.findById(rideId)
                 .orElseThrow(() -> new NotFoundException("Ride not found"));
+        // The response is derived from every accepted rider's coordinates, so
+        // an ungated preview let anyone probe the private stops of a ride they
+        // had nothing to do with by varying the query point and watching the
+        // returned distance move.
+        requireCanViewRide(ride, getCurrentUserContext());
         if (ride.getPickup() == null || ride.getDestination() == null) {
             throw new ConflictException("Ride has no route to price");
+        }
+        requireValidCoordinates(pickupLat, pickupLng, dropLat, dropLng);
+        if (seats < 1 || seats > MAX_SEATS) {
+            throw new IllegalArgumentException("Seats must be between 1 and " + MAX_SEATS);
         }
         double[] m = simulatedRouteMetrics(ride, pickupLat, pickupLng, dropLat, dropLng);
         double gross = Math.round(priceService.grossFromMetrics(
@@ -542,6 +602,17 @@ public class RideService {
         ride.setStatus(RideStatus.PENDING);
         rideRepository.save(ride);
 
+        // Retire the offer that put them on this ride. Left ACCEPTED, the
+        // duplicate-offer check (which only looks for a PENDING one) let the
+        // same driver immediately re-offer on the ride they just dropped.
+        driverOfferRepository.findByRideIdAndStatus(rideId, DriverOfferStatus.ACCEPTED)
+                .stream()
+                .filter(o -> driverId.equals(o.getDriverId()))
+                .forEach(o -> {
+                    o.setStatus(DriverOfferStatus.WITHDRAWN);
+                    driverOfferRepository.save(o);
+                });
+
         notificationPublisher.publish(RideNotificationEvent.DRIVER_CANCELLED, ride, recipients);
     }
 
@@ -615,6 +686,15 @@ public class RideService {
                 ? body.dropLat() : latOf(ride.getDestination()));
         request.setDropLng(body != null && body.dropLng() != null
                 ? body.dropLng() : lngOf(ride.getDestination()));
+        // A co-passenger's stops must plausibly be on the way. These
+        // coordinates are re-stamped onto the ride as its route, and that
+        // distance IS the fare everyone is billed — a request pointing at the
+        // far side of the planet is a valid lat/lng but stretched the trip to
+        // thousands of km, and because the host is capped at their solo fare
+        // the inflated remainder landed on the other riders.
+        requireNearRoute(ride, request.getPickupLat(), request.getPickupLng());
+        requireNearRoute(ride, request.getDropLat(), request.getDropLng());
+
         request.setStatus(JoinRequestStatus.PENDING);
         JoinRequest saved = joinRequestRepository.save(request);
 
@@ -638,6 +718,15 @@ public class RideService {
         if (!ride.getCreatedByUserId().equals(ctx.userId())) {
             throw new ForbiddenException("Only the host can respond to join requests");
         }
+        // Riders may only be added while the ride is still open. Accepting on
+        // a STARTED ride slipped someone in after the payment ledger was
+        // written, so they rode for free and the re-priced route no longer
+        // matched anyone's charged amount; accepting on a COMPLETED or
+        // CANCELLED one rewrote finished history.
+        if (ride.getStatus() != RideStatus.PENDING) {
+            throw new ConflictException(
+                    "This ride is no longer open — it is " + ride.getStatus().name().toLowerCase());
+        }
 
         JoinRequest request = pendingRequest(requestId, rideId);
         int wantedSeats = request.getSeats() != null && request.getSeats() > 0
@@ -647,6 +736,14 @@ public class RideService {
                     "Only " + ride.getAvailableSeats() + " seat(s) left on this ride");
         }
         UUID requesterId = request.getRequesterId();
+        // Re-check here, not just at request time: a rider can have pending
+        // requests on several rides at once, and without this two hosts
+        // accepting would each seat the same person on a different trip.
+        if (!rideParticipantsRepository.existsByRide_IdAndUserId(rideId, requesterId)
+                && rideRepository.hasActiveRideOrJoined(requesterId)) {
+            throw new ConflictException(
+                    "This passenger has since joined another ride.");
+        }
 
         if (!rideParticipantsRepository.existsByRide_IdAndUserId(rideId, requesterId)) {
             RideParticipants participant = new RideParticipants();
@@ -721,6 +818,15 @@ public class RideService {
         Ride ride = rideRepository.findById(rideId)
                 .orElseThrow(() -> new NotFoundException("Ride not found"));
 
+        // A finished ride is a record, not something to withdraw from. Leaving
+        // one used to delete the participant row — erasing the trip from the
+        // rider's history and their completed-trip count — and re-stamp the
+        // route, which retroactively changed the driver's recorded fare.
+        if (ride.getStatus() == RideStatus.COMPLETED
+                || ride.getStatus() == RideStatus.CANCELLED) {
+            throw new ConflictException("This ride has already finished");
+        }
+
         RideParticipants participant = rideParticipantsRepository
                 .findByRide_IdAndUserId(rideId, userId)
                 .orElseThrow(() -> new ConflictException("You haven't joined this ride"));
@@ -735,17 +841,36 @@ public class RideService {
         restampFullRoute(ride);
         rideRepository.save(ride);
 
-        // If the trip's cash ledger was already opened (ride STARTED), remove
-        // the leaver's un-collected payment + progress row — otherwise their
-        // never-paid share would be auto-"collected" at complete and inflate
-        // the driver's earnings with phantom cash.
-        ridePaymentRepository.findByRideIdAndUserId(rideId, userId).ifPresent(p -> {
-            if (p.getStatus() != PaymentStatus.COLLECTED) {
-                ridePaymentRepository.delete(p);
-            }
-        });
-        rideRiderProgressRepository.findByRideIdAndUserId(rideId, userId)
-                .ifPresent(rideRiderProgressRepository::delete);
+        // Whether the leaver still owes the fare turns on one thing: were they
+        // ever picked up? A rider who was collected and driven has had the
+        // service, so their charge stands — dropping it let someone ride to
+        // their destination, tap "leave" before the driver marked them off,
+        // and pay nothing. A rider who never boarded owes nothing, and
+        // clearing their row keeps it from being auto-collected at complete.
+        boolean wasPickedUp = rideRiderProgressRepository
+                .findByRideIdAndUserId(rideId, userId)
+                .map(p -> p.getStatus() != RiderProgressStatus.WAITING)
+                .orElse(false);
+        if (!wasPickedUp) {
+            ridePaymentRepository.findByRideIdAndUserId(rideId, userId).ifPresent(p -> {
+                if (p.getStatus() != PaymentStatus.COLLECTED) {
+                    ridePaymentRepository.delete(p);
+                }
+            });
+            rideRiderProgressRepository.findByRideIdAndUserId(rideId, userId)
+                    .ifPresent(rideRiderProgressRepository::delete);
+        }
+
+        // A re-join must not reuse the abandoned request: pricing, the map
+        // stops and the re-stamped route all pick the first ACCEPTED request
+        // per rider, so a stale one silently outranked the new route.
+        joinRequestRepository.findByRideIdAndStatus(rideId, JoinRequestStatus.ACCEPTED)
+                .stream()
+                .filter(jr -> jr.getRequesterId().equals(userId))
+                .forEach(jr -> {
+                    jr.setStatus(JoinRequestStatus.LEFT);
+                    joinRequestRepository.save(jr);
+                });
 
         // Preserve the fact that this user was on the ride (the participant
         // row is gone) so the bidirectional leave-time ratings can authorize.
@@ -805,14 +930,22 @@ public class RideService {
             return List.of();
         }
 
-        // With a location, PostGIS does the radius filter AND the nearest-first
-        // ordering in one indexed query (ST_DWithin + the <-> KNN operator).
-        // Without a location we can't measure distance, so fall back to the
-        // non-spatial list (newest-first).
+        // With a location the query does the radius filter AND the
+        // nearest-first ordering in one pass. Without a location we can't
+        // measure distance, so fall back to the plain list (newest-first).
         List<Ride> rides = (lat != null && lng != null)
                 ? rideRepository.findAvailableRidesNearby(
                         currentUserId, riderGender.name(), lat, lng, SEARCH_RADIUS_KM * 1000)
                 : rideRepository.findAvailableRides(currentUserId, riderGender);
+
+        // Scheduled rides stay browsable — planning ahead is the point — but
+        // one whose departure already passed is not joinable. StaleRideSweeper
+        // cancels these; this covers the gap between departure and the sweep.
+        Instant departedBefore = Instant.now();
+        rides = rides.stream()
+                .filter(r -> r.getDepartureTime() == null
+                        || r.getDepartureTime().isAfter(departedBefore))
+                .toList();
 
         // Keep blocked users apart: hide rides hosted by someone the viewer has
         // blocked, or who has blocked the viewer.
@@ -895,6 +1028,13 @@ public class RideService {
                                     .countCompletedTripsForUser(hostId))
                             .hostGender(r.getGender() != null ? r.getGender().name() : null)
                             .youAreHost(mine)
+                            // Without these the host's own "Your Rides" card
+                            // lost the schedule and rendered their scheduled
+                            // ride as "Leave now", while everyone else's feed
+                            // showed the correct time.
+                            .departureTime(r.getDepartureTime())
+                            .tripDistanceKm(r.getRouteDistanceKm())
+                            .tripDurationMin(r.getRouteDurationMin())
                             .fareForRider(priceService.estimateRiderFare(r))
                             .pickup(r.getPickup() != null ? r.getPickup().getAddress() : null)
                             .drop(r.getDestination() != null ? r.getDestination().getAddress() : null)
@@ -912,8 +1052,8 @@ public class RideService {
     // ── Driver ride-lifecycle ──────────────────────────────────────
 
     /**
-     * Fresh ride requests a driver can claim. With the driver's location,
-     * PostGIS bounds the feed to nearby PENDING rides (within
+     * Fresh ride requests a driver can claim. With the driver's location, the
+     * feed is bounded to nearby PENDING rides (within
      * {@code DRIVER_SEARCH_RADIUS_KM}), ordered nearest-first and stamped with
      * a distance; without it, falls back to the full pending feed. Reuses the
      * same host-resolution + fare mapping as the passenger feed.
@@ -923,6 +1063,15 @@ public class RideService {
         List<Ride> rides = (lat != null && lng != null)
                 ? rideRepository.findDriverFeedNearby(lat, lng, DRIVER_SEARCH_RADIUS_KM * 1000)
                 : rideRepository.findDriverFeed();
+
+        // Only rides leaving now (or nearly). A driver claiming next week's
+        // ride would burn their one active-ride slot for days, and it would
+        // sit here looking like work available right now.
+        Instant claimableUntil = Instant.now().plus(DRIVER_FEED_LEAD_TIME);
+        rides = rides.stream()
+                .filter(r -> r.getDepartureTime() == null
+                        || !r.getDepartureTime().isAfter(claimableUntil))
+                .toList();
 
         // Hide rides this driver has dismissed so they don't reappear each poll.
         Set<UUID> declined = new HashSet<>(
@@ -1082,6 +1231,13 @@ public class RideService {
 
         DriverOffer offer = pendingOffer(offerId, rideId);
         UUID driverId = offer.getDriverId();
+        // A driver can have offers out on several rides at once — at offer
+        // time none of them is assigned yet, so that check passes for all.
+        // Without re-checking here, two hosts accepting the same driver put
+        // them on two simultaneous trips.
+        if (!rideRepository.findDriverActiveRides(driverId).isEmpty()) {
+            throw new ConflictException("This driver has since taken another ride");
+        }
 
         ride.setDriverId(driverId);
         ride.setStatus(RideStatus.ACCEPTED);
@@ -1250,16 +1406,26 @@ public class RideService {
         Ride saved = rideRepository.save(ride);
 
         // Ensure the fare ledger exists (normally opened at START), then settle
-        // any fares not already collected per-drop — completing the trip means
-        // all cash is in hand, so driver earnings reflect the full ride.
+        // the fares of riders who actually travelled. A rider still WAITING
+        // never boarded, so flipping their row to COLLECTED credited the
+        // driver with cash nobody handed over and stamped a "Paid" badge on a
+        // fare the rider never owed. Those rows are cancelled instead.
         createPaymentsForRide(saved);
+        Map<UUID, RiderProgressStatus> progress = rideRiderProgressRepository
+                .findByRideId(saved.getId()).stream()
+                .collect(Collectors.toMap(RideRiderProgress::getUserId,
+                        RideRiderProgress::getStatus, (a, b) -> a));
         Instant now = Instant.now();
         for (RidePayment p : ridePaymentRepository.findByRideId(saved.getId())) {
-            if (p.getStatus() != PaymentStatus.COLLECTED) {
-                p.setStatus(PaymentStatus.COLLECTED);
-                p.setCollectedAt(now);
-                ridePaymentRepository.save(p);
+            if (p.getStatus() == PaymentStatus.COLLECTED) {
+                continue;
             }
+            // No progress row at all means the trip never tracked this rider
+            // (host on a short hop, legacy ride) — treat that as travelled.
+            boolean noShow = progress.get(p.getUserId()) == RiderProgressStatus.WAITING;
+            p.setStatus(noShow ? PaymentStatus.CANCELLED : PaymentStatus.COLLECTED);
+            p.setCollectedAt(noShow ? null : now);
+            ridePaymentRepository.save(p);
         }
 
         // Host + co-passengers + the driver.
@@ -1327,6 +1493,75 @@ public class RideService {
         }
         Map<UUID, PassengerSummary> people = fetchPassengerSummaries(List.of(riderId));
         return toPaymentResponse(payment, people, ride.getCreatedByUserId());
+    }
+
+    /**
+     * Who may open a ride's full detail — which includes every rider's name,
+     * their exact pickup/drop coordinates, and (for the assigned driver)
+     * phone numbers.
+     *
+     * <p>This used to be ungated: any authenticated account could read any
+     * ride by id, so anyone could register, claim the DRIVER role, page
+     * through the global feed and harvest names, phone numbers and home
+     * coordinates. Blocks were bypassed too, since they were only applied
+     * when building the feeds.
+     *
+     * <p>Members and the assigned driver always pass. Non-members pass only
+     * for a ride they could genuinely act on — an open ride matching their
+     * gender for a passenger about to join, or one published to drivers for a
+     * driver about to offer — and never one whose host they're blocked from.
+     */
+    private void requireCanViewRide(Ride ride, UserContext ctx) {
+        UUID viewerId = ctx.userId();
+        if (isMemberOrDriver(ride, viewerId)) {
+            return;
+        }
+        boolean open = ride.getStatus() == RideStatus.PENDING;
+        boolean notBlocked = !blockedRelatedTo(viewerId).contains(ride.getCreatedByUserId());
+        boolean eligible = switch (ctx.role()) {
+            case "PASSENGER" -> open && ride.getGender() != null
+                    && ride.getGender() == parseGender(ctx.gender());
+            case "DRIVER" -> open && ride.isPublishedToDrivers();
+            default -> false;
+        };
+        if (!eligible || !notBlocked) {
+            throw new ForbiddenException("You don't have access to this ride");
+        }
+    }
+
+    /**
+     * Rejects coordinates outside the globe. These feed
+     * {@code restampFullRoute}, whose distance becomes the fare everyone on
+     * the ride is billed — a join request pointing at lat 89.99 stretched the
+     * shared route to thousands of km and pushed the cost onto the other
+     * co-passengers, since the host is capped at their solo fare.
+     */
+    private static void requireValidCoordinates(double pickupLat, double pickupLng,
+                                                double dropLat, double dropLng) {
+        if (Math.abs(pickupLat) > 90 || Math.abs(dropLat) > 90
+                || Math.abs(pickupLng) > 180 || Math.abs(dropLng) > 180) {
+            throw new IllegalArgumentException("Coordinates are out of range");
+        }
+    }
+
+    /**
+     * Rejects a stop that is nowhere near the ride, measured from whichever of
+     * its own endpoints is closer. Generous enough for a real cross-town
+     * detour, tight enough that the shared route can't be blown up.
+     */
+    private void requireNearRoute(Ride ride, Double lat, Double lng) {
+        if (lat == null || lng == null
+                || ride.getPickup() == null || ride.getDestination() == null) {
+            return;
+        }
+        double toPickup = priceService.distanceKm(lat, lng,
+                ride.getPickup().getLatitude(), ride.getPickup().getLongitude());
+        double toDrop = priceService.distanceKm(lat, lng,
+                ride.getDestination().getLatitude(), ride.getDestination().getLongitude());
+        if (Math.min(toPickup, toDrop) > JOIN_DETOUR_LIMIT_KM) {
+            throw new IllegalArgumentException(
+                    "That stop is too far from this ride's route.");
+        }
     }
 
     private boolean isMemberOrDriver(Ride ride, UUID userId) {
@@ -1454,6 +1689,7 @@ public class RideService {
 
         Ride ride = rideRepository.findById(rideId)
                 .orElseThrow(() -> new NotFoundException("Ride not found"));
+        requireCanViewRide(ride, ctx);
 
         UUID hostId = ride.getCreatedByUserId();
         int hostTrips = (int) rideRepository.countCompletedTripsForUser(hostId);
@@ -1478,10 +1714,12 @@ public class RideService {
                 .collect(Collectors.toMap(
                         JoinRequest::getRequesterId, jr -> jr, (a, b) -> a));
 
-        // Phone numbers are shared with drivers (to call riders and coordinate
-        // pickup) — not between riders. A driver reviewing/​driving the ride
-        // sees them; passengers never see each other's numbers.
-        boolean viewerIsDriver = "DRIVER".equals(ctx.role());
+        // Phone numbers go to the driver actually running this ride, so they
+        // can call riders at pickup — nobody else. Keying this off the JWT's
+        // role claim instead handed every rider's number to any account that
+        // called itself a DRIVER, whether or not it was on the ride.
+        boolean viewerIsDriver = ride.getDriverId() != null
+                && ride.getDriverId().equals(viewerId);
 
         // Per-rider pickup/drop progress (empty until the trip starts).
         Map<UUID, String> progress = rideRiderProgressRepository.findByRideId(rideId)
@@ -1745,17 +1983,24 @@ public class RideService {
         Map<UUID, Integer> ratingsGiven = fetchDriverRatingsGiven(
                 ctx.userId(), rides.stream().map(Ride::getId).toList());
 
-        // Whether this rider's cash fare was collected, per ride, for the
-        // "Paid" badge on completed rides.
-        Map<UUID, Boolean> paidByRide = ridePaymentRepository
+        // This rider's own ledger rows for the rides shown: the "Paid" badge
+        // AND the amount. History used to print estimateRiderFare(), which
+        // splits the gross over one MORE head than the ride actually had — so
+        // a finished trip displayed a number nobody was ever charged, while
+        // the real figure sat in the row right here.
+        List<RidePayment> myPayments = ridePaymentRepository
                 .findByUserIdAndRideIdIn(ctx.userId(),
-                        rides.stream().map(Ride::getId).toList())
-                .stream()
+                        rides.stream().map(Ride::getId).toList());
+        Map<UUID, Boolean> paidByRide = myPayments.stream()
                 .collect(Collectors.toMap(RidePayment::getRideId,
                         p -> p.getStatus() == PaymentStatus.COLLECTED, (a, b) -> a || b));
+        Map<UUID, Double> chargedByRide = myPayments.stream()
+                .filter(p -> p.getStatus() != PaymentStatus.CANCELLED)
+                .collect(Collectors.toMap(RidePayment::getRideId,
+                        RidePayment::getAmount, (a, b) -> a));
 
         return rides.stream()
-                .map(r -> toHistoryItem(r, drivers, ratingsGiven, paidByRide))
+                .map(r -> toHistoryItem(r, drivers, ratingsGiven, paidByRide, chargedByRide))
                 .toList();
     }
 
@@ -1772,7 +2017,8 @@ public class RideService {
 
     private PassengerRideHistoryResponse toHistoryItem(Ride r, Map<UUID, DriverSummary> drivers,
                                                        Map<UUID, Integer> ratingsGiven,
-                                                       Map<UUID, Boolean> paidByRide) {
+                                                       Map<UUID, Boolean> paidByRide,
+                                                       Map<UUID, Double> chargedByRide) {
         // Cancelled rides carry a cancelledAt; completed rides have no
         // dedicated end timestamp yet, so fall back to createdAt.
         Instant ts = r.getStatus() == RideStatus.CANCELLED && r.getCancelledAt() != null
@@ -1789,7 +2035,10 @@ public class RideService {
                 .drop(r.getDestination() != null ? r.getDestination().getAddress() : null)
                 .status(r.getStatus() != null ? r.getStatus().name() : null)
                 .completedAt(completedAt)
-                .fare(priceService.estimateRiderFare(r))
+                // The amount actually billed to this rider; the estimate is
+                // only a fallback for rides that never opened a ledger.
+                .fare(chargedByRide.getOrDefault(r.getId(),
+                        priceService.estimateRiderFare(r)))
                 // Populated for rides a driver actually took; null otherwise
                 // (cancelled-before-accept, or driver profile unreachable).
                 .driverName(driver != null ? driver.fullName() : null)

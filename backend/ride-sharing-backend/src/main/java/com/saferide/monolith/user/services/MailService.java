@@ -1,70 +1,44 @@
 package com.saferide.monolith.user.services;
 
-import jakarta.mail.MessagingException;
-import jakarta.mail.internet.MimeMessage;
+import com.saferide.monolith.user.services.mail.MailTransport;
 import lombok.extern.slf4j.Slf4j;
 import org.springframework.beans.factory.annotation.Value;
-import org.springframework.mail.javamail.JavaMailSender;
-import org.springframework.mail.javamail.MimeMessageHelper;
 import org.springframework.scheduling.annotation.Async;
 import org.springframework.stereotype.Service;
 
 @Service
 @Slf4j
 public class MailService {
-    private final JavaMailSender mailSender;
-    @Value("${spring.mail.username}")
-    private String fromEmail;
+
+    /**
+     * Composes the messages; the transport (Brevo API or SMTP) is injected, so
+     * changing provider never touches the templates below.
+     */
+    private final MailTransport transport;
+
     @Value("${app.verification.base-url}")
     private String verificationBaseUrl;
     @Value("${app.reset.base-url}")
     private String resetBaseUrl;
 
-    public MailService(JavaMailSender mailSender) {
-        this.mailSender = mailSender;
+    public MailService(MailTransport transport) {
+        this.transport = transport;
     }
 
     @Async
     public void sendEmail(String email, String rawToken) {
-
-        try {
-            String verificationLink =
-                    verificationBaseUrl + "/verify-email?token=" + rawToken;
-            String htmlBody = buildVerificationEmailBody(verificationLink);
-            MimeMessage mailMessage = mailSender.createMimeMessage();
-            MimeMessageHelper helper = new MimeMessageHelper(
-                    mailMessage, true, "UTF-8");
-            helper.setFrom(fromEmail);
-            helper.setTo(email);
-            helper.setSubject("Verify Your Account - Safe Ride");
-            helper.setText(htmlBody, true);
-            mailSender.send(mailMessage);
-            log.info("Verification email sent successfully to {}", email);
-        } catch (MessagingException e) {
-            log.error("Failed to send verification email to {}: {}", email, e.getMessage(), e);
-        }
-
+        String verificationLink = verificationBaseUrl + "/verify-email?token=" + rawToken;
+        transport.send(email, "Verify Your Account - Safe Ride",
+                buildVerificationEmailBody(verificationLink));
     }
 
     @Async
     public void sendPasswordResetEmail(String email, String rawToken) {
-        try {
-            // Points at the frontend app's reset route (not the API) so the
-            // user lands on the "create new password" screen with the token.
-            String resetLink = resetBaseUrl + "/reset-password?token=" + rawToken;
-            String htmlBody = buildPasswordResetEmailBody(resetLink);
-            MimeMessage mailMessage = mailSender.createMimeMessage();
-            MimeMessageHelper helper = new MimeMessageHelper(
-                    mailMessage, true, "UTF-8");
-            helper.setFrom(fromEmail);
-            helper.setTo(email);
-            helper.setSubject("Reset Your Password - Safe Ride");
-            helper.setText(htmlBody, true);
-            mailSender.send(mailMessage);
-            log.info("Password reset email sent successfully to {}", email);
-        } catch (MessagingException e) {
-            log.error("Failed to send password reset email to {}: {}", email, e.getMessage(), e);
-        }
+        // Points at the frontend app's reset route (not the API) so the user
+        // lands on the "create new password" screen with the token.
+        String resetLink = resetBaseUrl + "/reset-password?token=" + rawToken;
+        transport.send(email, "Reset Your Password - Safe Ride",
+                buildPasswordResetEmailBody(resetLink));
     }
 
     private String buildVerificationEmailBody(String verificationLink) {

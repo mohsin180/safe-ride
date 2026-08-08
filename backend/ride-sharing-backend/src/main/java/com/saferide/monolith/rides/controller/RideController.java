@@ -105,7 +105,7 @@ public class RideController {
     @PreAuthorize("hasRole('PASSENGER')")
     public ResponseEntity<Void> requestToJoin(
             @PathVariable("id") UUID id,
-            @RequestBody(required = false) JoinRequestBody body) {
+            @Valid @RequestBody(required = false) JoinRequestBody body) {
         rideService.requestToJoin(id, body);
         return ResponseEntity.noContent().build();
     }

@@ -79,6 +79,12 @@ public class UserExceptionHandler {
         return new ResponseEntity<>(errorResponse, HttpStatus.BAD_REQUEST);
     }
 
+    @ExceptionHandler(TooManyAttemptsException.class)
+    public ResponseEntity<ErrorResponse> tooManyAttemptsException(TooManyAttemptsException ex) {
+        ErrorResponse errorResponse = new ErrorResponse(HttpStatus.TOO_MANY_REQUESTS.value(), ex.getMessage());
+        return new ResponseEntity<>(errorResponse, HttpStatus.TOO_MANY_REQUESTS);
+    }
+
     @ExceptionHandler(InvalidOnboardingTokenException.class)
     public ResponseEntity<ErrorResponse> invalidOnboardingTokenException(InvalidOnboardingTokenException ex) {
         ErrorResponse errorResponse = new ErrorResponse(HttpStatus.UNAUTHORIZED.value(), ex.getMessage());

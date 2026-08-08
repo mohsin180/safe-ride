@@ -156,10 +156,27 @@ public class PriceService {
             shares.put(e.getKey(), gross * e.getValue() / totalW);
         }
 
-        // Host cap: never above their solo fare; excess flows to the
-        // co-passengers (the detour-causers), proportionally by weight.
+        // Extra-seat surcharge first, so what follows works on the amounts
+        // riders are actually charged. Driving the trip costs the same whether
+        // a rider takes one seat or three, but held seats stop anyone else
+        // joining — so the ride's total lands ABOVE the gross, which is why
+        // tripFare() sums these shares instead of returning the gross.
+        applySeatSurcharge(shares, seatsByRider);
+
+        // The whole ride's take, surcharges included — what the split must add
+        // up to once rounded.
+        double target = round2(shares.values().stream()
+                .mapToDouble(Double::doubleValue).sum());
+
+        // Host cap: co-passengers joining can only ever lower the host's cost,
+        // never raise it. The cap is the host's SOLO charge including their own
+        // seat surcharge — comparing against the bare solo gross (as this did
+        // before the surcharge existed) let a 3-seat host be billed 30% over
+        // the very ceiling meant to protect them. Any excess flows to the
+        // co-passengers whose detours caused it, proportionally by weight.
         if (shares.size() > 1) {
-            double cap = soloHostGross(ride);
+            double cap = round2(soloHostGross(ride)
+                    * seatSurchargeFactor(seatsByRider.getOrDefault(hostId, 1)));
             double hostShare = shares.get(hostId);
             if (hostShare > cap) {
                 double excess = hostShare - cap;
@@ -172,27 +189,30 @@ public class PriceService {
             }
         }
 
-        // Round to 2dp and pin the drift on the largest share so the sum is
-        // exactly the gross (driver collects the full fare, no paisa gaps).
-        UUID largest = hostId;
+        // Round to 2dp and pin the drift on the largest NON-host share where
+        // there is one, so the sum is exact without nudging the host back over
+        // their cap by a paisa.
+        UUID drift = hostId;
         double largestV = -1;
         double sum = 0;
         for (Map.Entry<UUID, Double> e : shares.entrySet()) {
             double r = round2(e.getValue());
             shares.put(e.getKey(), r);
             sum += r;
-            if (r > largestV) { largestV = r; largest = e.getKey(); }
+            boolean preferable = shares.size() == 1 || !e.getKey().equals(hostId);
+            if (preferable && r > largestV) {
+                largestV = r;
+                drift = e.getKey();
+            }
         }
-        shares.merge(largest, round2(gross - sum), Double::sum);
-        shares.put(largest, round2(shares.get(largest)));
-
-        // Extra-seat surcharge, applied last so it rides on top of a split
-        // that already sums to the gross. Driving the trip costs the same
-        // whether one rider takes one seat or three, but the held seats stop
-        // anyone else joining — so the total ends up ABOVE the gross, and
-        // tripFare() sums the shares rather than returning the gross.
-        applySeatSurcharge(shares, seatsByRider);
+        shares.merge(drift, round2(target - sum), Double::sum);
+        shares.put(drift, round2(shares.get(drift)));
         return shares;
+    }
+
+    /** Multiplier a rider's share carries for the extra seats they hold. */
+    private double seatSurchargeFactor(int seats) {
+        return 1 + props.getSeatSurchargeRate() * Math.max(0, seats - 1);
     }
 
     private void applySeatSurcharge(Map<UUID, Double> shares, Map<UUID, Integer> seatsByRider) {
@@ -203,6 +223,8 @@ public class PriceService {
         for (Map.Entry<UUID, Double> e : shares.entrySet()) {
             int extraSeats = Math.max(0, seatsByRider.getOrDefault(e.getKey(), 1) - 1);
             if (extraSeats > 0) {
+                // Same shape as seatSurchargeFactor, kept inline so the map
+                // entry can be replaced in one pass.
                 shares.put(e.getKey(), round2(e.getValue() * (1 + rate * extraSeats)));
             }
         }

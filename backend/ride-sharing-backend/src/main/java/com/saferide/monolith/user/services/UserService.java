@@ -8,6 +8,7 @@ import com.saferide.monolith.user.model.UserMapper;
 import com.saferide.monolith.user.model.Users;
 import com.saferide.monolith.user.model.dtos.*;
 import com.saferide.monolith.user.repos.UserRepository;
+import com.saferide.monolith.user.security.AttemptLimiter;
 import com.saferide.monolith.user.security.JwtUtil;
 import org.apache.coyote.BadRequestException;
 import org.springframework.security.authentication.AuthenticationManager;
@@ -27,14 +28,17 @@ public class UserService {
     private final JwtUtil jwtUtil;
     private final PasswordEncoder passwordEncoder;
     private final EmailVerificationService verificationService;
+    private final AttemptLimiter attemptLimiter;
 
-    public UserService(UserRepository userRepository, UserMapper userMapper, AuthenticationManager authenticationManager, JwtUtil jwtUtil, PasswordEncoder passwordEncoder, EmailVerificationService verificationService) {
+    public UserService(UserRepository userRepository, UserMapper userMapper, AuthenticationManager authenticationManager, JwtUtil jwtUtil, PasswordEncoder passwordEncoder, EmailVerificationService verificationService,
+                       AttemptLimiter attemptLimiter) {
         this.userRepository = userRepository;
         this.userMapper = userMapper;
         this.authenticationManager = authenticationManager;
         this.jwtUtil = jwtUtil;
         this.passwordEncoder = passwordEncoder;
         this.verificationService = verificationService;
+        this.attemptLimiter = attemptLimiter;
     }
 
     public UserResponse register(RegisterRequest request) {
@@ -54,6 +58,9 @@ public class UserService {
     }
 
     public LoginResponse login(LoginRequest request) throws BadRequestException {
+        // Bounded before the password is ever hashed, so a brute-force run
+        // can't spend the CPU either.
+        attemptLimiter.check("sign in", request.email());
         try {
             authenticationManager.authenticate(
                     new UsernamePasswordAuthenticationToken(
@@ -86,6 +93,9 @@ public class UserService {
         String token = jwtUtil.generateToken(
                 users.getId(), users.getRole().name(), users.getGender().name(), users.getEmail());
 
+        // A genuine sign-in clears the budget so a user who fat-fingered their
+        // password a few times isn't left locked out.
+        attemptLimiter.reset(request.email());
         return LoginResponse.builder()
                 .token(token)
                 .build();
@@ -108,6 +118,20 @@ public class UserService {
         Users users = userRepository.findById(userId).orElseThrow(
                 () -> new UsernameNotFoundException("User NotFound")
         );
+        // The same gates login enforces. Without them, /register followed by
+        // /select-role minted a full access token for an address the caller
+        // never proved they own — "verified email" meant nothing.
+        if (!users.isEnabled()) {
+            throw new UserNotFoundException("Account is disabled");
+        }
+        if (!users.isEmailVerified()) {
+            throw new UserNotFoundException("Please verify your email before choosing a role");
+        }
+        // The onboarding token stays valid for 24h; without this it could be
+        // replayed afterwards to flip a settled account's role.
+        if (users.getRole() != null) {
+            throw new UserAlreadyExistException("A role has already been chosen for this account");
+        }
         users.setRole(Role.valueOf(request.role()));
         Users updatedUser = userRepository.save(users);
         String token = jwtUtil.generateToken(

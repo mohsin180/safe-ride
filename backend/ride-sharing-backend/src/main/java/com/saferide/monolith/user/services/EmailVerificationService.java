@@ -2,6 +2,7 @@ package com.saferide.monolith.user.services;
 
 import com.saferide.monolith.user.exceptions.InvalidTokenException;
 import com.saferide.monolith.user.exceptions.UserNotFoundException;
+import com.saferide.monolith.user.security.AttemptLimiter;
 import com.saferide.monolith.user.model.EmailVerificationToken;
 import com.saferide.monolith.user.model.Users;
 import com.saferide.monolith.user.repos.EmailVerificationTokenRepo;
@@ -21,13 +22,16 @@ public class EmailVerificationService {
     private final UserRepository userRepository;
     private final MailService mailService;
     private final EmailVerificationTokenRepo tokenRepo;
+    private final AttemptLimiter attemptLimiter;
     @Value("${app.verification.token-expiry-hours}")
     private int tokenExpiry;
 
-    public EmailVerificationService(UserRepository userRepository, MailService mailService, EmailVerificationTokenRepo tokenRepo) {
+    public EmailVerificationService(UserRepository userRepository, MailService mailService,
+                                    EmailVerificationTokenRepo tokenRepo, AttemptLimiter attemptLimiter) {
         this.userRepository = userRepository;
         this.mailService = mailService;
         this.tokenRepo = tokenRepo;
+        this.attemptLimiter = attemptLimiter;
     }
 
     @Transactional
@@ -72,6 +76,9 @@ public class EmailVerificationService {
 
     @Transactional
     public void resendVerificationEmail(String email) {
+        // Unbounded, this endpoint could flood an inbox and burn the app's
+        // SMTP quota; the address is the natural budget key.
+        attemptLimiter.check("resend the verification email", email);
         Users users = userRepository.findByEmail(email).orElseThrow(
                 () -> new UserNotFoundException("Email was not found")
         );

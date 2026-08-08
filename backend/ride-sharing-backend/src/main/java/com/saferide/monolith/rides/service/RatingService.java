@@ -143,10 +143,17 @@ public class RatingService {
         Ride ride = rideRepository.findById(rideId)
                 .orElseThrow(() -> new NotFoundException("Ride not found"));
         RideStatus status = ride.getStatus();
-        if (status != RideStatus.ACCEPTED
+        // Only once the trip is actually under way. ACCEPTED used to qualify,
+        // which meant the moment a host picked a driver any rider could fire a
+        // one-star review before the car had moved — and ratings are one per
+        // (ride, rater, rated), so that verdict was permanent. ARRIVED belongs
+        // here too: it was missing, so ratings failed for the whole window
+        // between the driver pulling up and the trip starting.
+        if (status != RideStatus.ARRIVED
                 && status != RideStatus.STARTED
                 && status != RideStatus.COMPLETED) {
-            throw new ConflictException("This ride can't be rated");
+            throw new ConflictException(
+                    "You can rate once the trip has started");
         }
         return ride;
     }

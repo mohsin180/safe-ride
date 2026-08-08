@@ -6,6 +6,7 @@ import org.springframework.boot.autoconfigure.SpringBootApplication;
 import org.springframework.boot.context.properties.EnableConfigurationProperties;
 import org.springframework.data.jpa.repository.config.EnableJpaAuditing;
 import org.springframework.scheduling.annotation.EnableAsync;
+import org.springframework.scheduling.annotation.EnableScheduling;
 
 /**
  * SafeRide monolith — all former microservices (user, profile, rides,
@@ -14,6 +15,8 @@ import org.springframework.scheduling.annotation.EnableAsync;
  */
 @SpringBootApplication
 @EnableAsync
+// Drives StaleRideSweeper, which retires scheduled rides nobody drove.
+@EnableScheduling
 @EnableJpaAuditing
 @EnableConfigurationProperties(PricingProperties.class)
 public class MonolithApplication {

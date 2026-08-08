@@ -51,12 +51,14 @@ public class DiditClient {
         this.client = RestClient.builder()
                 .baseUrl(baseUrl)
                 .defaultHeader("x-api-key", apiKey)
-                // Appended, not prepended: it is needed to READ Didit's JSON
-                // responses, but must not outrank the byte[] converter when
-                // writing, or the pre-serialised payload gets JSON-encoded a
-                // second time and arrives as a quoted string.
-                .messageConverters(converters ->
-                        converters.add(new JacksonJsonHttpMessageConverter()))
+                // Registered explicitly: the bare builder's defaults can't read
+                // Didit's JSON responses. Slotted in as the JSON converter
+                // rather than first in the list, so the byte[] converter still
+                // handles the pre-serialised body — otherwise the payload gets
+                // JSON-encoded a second time and arrives as a quoted string.
+                .configureMessageConverters(c -> c
+                        .registerDefaults()
+                        .withJsonConverter(new JacksonJsonHttpMessageConverter()))
                 .build();
     }
 

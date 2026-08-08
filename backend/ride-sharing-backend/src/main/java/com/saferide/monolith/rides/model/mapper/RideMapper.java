@@ -30,6 +30,9 @@ public interface RideMapper {
     @Mapping(target = "drop", source = "destination.address")
     @Mapping(target = "dropLat", source = "destination.latitude")
     @Mapping(target = "dropLng", source = "destination.longitude")
-    @Mapping(target = "seats", source = "totalSeats")
+    // The host's own party, not the car's capacity. totalSeats is hard-set to
+    // MAX_SEATS for every ride, so mapping from it made create/publish/accept
+    // responses always claim 4 seats regardless of what the host booked.
+    @Mapping(target = "seats", source = "hostSeats")
     RideResponse toResponse(Ride ride);
 }

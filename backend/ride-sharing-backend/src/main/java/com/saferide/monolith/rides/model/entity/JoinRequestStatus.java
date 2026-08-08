@@ -4,5 +4,12 @@ package com.saferide.monolith.rides.model.entity;
 public enum JoinRequestStatus {
     PENDING,
     ACCEPTED,
-    DECLINED
+    DECLINED,
+    /**
+     * Was accepted, then the rider left the ride. Retired rather than deleted
+     * so the history survives — and so a later re-join doesn't collide with
+     * it: every consumer keys accepted requests by requester and keeps the
+     * first, which meant an abandoned route kept overriding the new one.
+     */
+    LEFT
 }

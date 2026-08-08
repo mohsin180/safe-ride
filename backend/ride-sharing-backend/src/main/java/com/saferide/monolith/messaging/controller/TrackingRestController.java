@@ -51,16 +51,21 @@ public class TrackingRestController {
         if (body == null || !ridesClient.isMember(rideId, userId)) {
             return ResponseEntity.status(403).build();
         }
+        // Trust the ride's assignment, not the role the caller typed into the
+        // body — otherwise a co-passenger could publish as "DRIVER" and move
+        // the car on everyone else's map.
+        boolean isDriver = ridesClient.isAssignedDriver(rideId, userId);
         java.time.Instant now = java.time.Instant.now();
         LocationUpdate out = new LocationUpdate(
-                userId, body.role(), body.lat(), body.lng(), body.bearing(), now);
+                userId, isDriver ? "DRIVER" : "RIDER",
+                body.lat(), body.lng(), body.bearing(), now);
         try {
             messagingTemplate.convertAndSend(
                     TrackingController.TOPIC_PREFIX + rideId, out);
         } catch (Exception ignored) {
             // broadcast is best-effort; persistence below is what matters
         }
-        if (body.role() != null && "DRIVER".equalsIgnoreCase(body.role())) {
+        if (isDriver) {
             try {
                 driverLocationRepository.save(new RideDriverLocation(
                         rideId, userId, body.lat(), body.lng(), body.bearing(), now));

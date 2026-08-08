@@ -8,12 +8,50 @@ import org.springframework.data.jpa.repository.Query;
 import org.springframework.data.repository.query.Param;
 import org.springframework.stereotype.Repository;
 
+import java.time.Instant;
 import java.util.Collection;
 import java.util.List;
 import java.util.UUID;
 
 @Repository
 public interface RideRepository extends JpaRepository<Ride, UUID> {
+
+    /**
+     * Great-circle distance in METRES between the bound {@code :lat}/{@code :lng}
+     * and a ride's pickup, as plain SQL over the {@code pickup_lat} /
+     * {@code pickup_long} columns the entity already persists.
+     *
+     * <p>These queries used to call PostGIS ({@code ST_DWithin} and the
+     * {@code <->} KNN operator) against a {@code pickup_geog} column. Neither
+     * exists: the extension was never installed and no migration ever added
+     * that column, so every nearby lookup failed with
+     * {@code column r.pickup_geog does not exist}. Haversine needs no
+     * extension and no column Hibernate can't create, so a freshly built
+     * database works without manual DDL.
+     *
+     * <p>The trade-off is no spatial index — fine at this scale, and correct
+     * everywhere, which the indexed version never actually was.
+     */
+    String PICKUP_DISTANCE_METERS =
+            "(6371000 * 2 * asin(sqrt("
+            + "power(sin(radians(CAST(:lat AS double precision) - r.pickup_lat) / 2), 2)"
+            + " + cos(radians(CAST(:lat AS double precision))) * cos(radians(r.pickup_lat))"
+            + " * power(sin(radians(CAST(:lng AS double precision) - r.pickup_long) / 2), 2))))";
+
+    /**
+     * Every status that means "this ride is still happening".
+     *
+     * <p>Kept in one place because it was previously spelled out per query and
+     * drifted: {@code ARRIVED} and {@code STARTED} were missing from the
+     * one-ride-at-a-time guard, so a rider sitting in a moving car counted as
+     * free and could book a second ride — while their "Your Rides" tab showed
+     * nothing, since the same statuses were missing there too.
+     */
+    String ACTIVE_STATUSES =
+            "(com.saferide.monolith.rides.model.entity.RideStatus.PENDING, "
+            + "com.saferide.monolith.rides.model.entity.RideStatus.ACCEPTED, "
+            + "com.saferide.monolith.rides.model.entity.RideStatus.ARRIVED, "
+            + "com.saferide.monolith.rides.model.entity.RideStatus.STARTED)";
 
     long countByCreatedByUserIdAndStatus(UUID createdByUserId, RideStatus status);
 
@@ -45,10 +83,9 @@ public interface RideRepository extends JpaRepository<Ride, UUID> {
     /**
      * Same as {@link #findAvailableRides} but spatially bounded: only rides
      * whose pickup is within {@code radiusMeters} of the rider, ordered
-     * nearest-first. Backed by the PostGIS GiST index on {@code pickup_geog}
-     * — {@code ST_DWithin} for the radius, the {@code <->} KNN operator for the
-     * order. Native because these are PostGIS operators JPQL can't express;
-     * gender is bound as its String name (the column stores the enum name).
+     * nearest-first. Distance comes from {@link #PICKUP_DISTANCE_METERS}.
+     * Native because the maths is easier to express in SQL than JPQL; gender
+     * is bound as its String name (the column stores the enum name).
      */
     @Query(value = "SELECT r.* FROM ride r "
             + "WHERE r.status = 'PENDING' "
@@ -56,8 +93,9 @@ public interface RideRepository extends JpaRepository<Ride, UUID> {
             + "AND r.gender = :gender "
             + "AND r.available_seats > 0 "
             + "AND r.id NOT IN (SELECT p.ride_id FROM ride_participants p WHERE p.user_id = :uid) "
-            + "AND ST_DWithin(r.pickup_geog, ST_SetSRID(ST_MakePoint(:lng, :lat), 4326)::geography, :radiusMeters) "
-            + "ORDER BY r.pickup_geog <-> ST_SetSRID(ST_MakePoint(:lng, :lat), 4326)::geography",
+            + "AND r.pickup_lat IS NOT NULL AND r.pickup_long IS NOT NULL "
+            + "AND " + PICKUP_DISTANCE_METERS + " <= :radiusMeters "
+            + "ORDER BY " + PICKUP_DISTANCE_METERS,
             nativeQuery = true)
     List<Ride> findAvailableRidesNearby(@Param("uid") UUID uid,
                                         @Param("gender") String gender,
@@ -67,8 +105,7 @@ public interface RideRepository extends JpaRepository<Ride, UUID> {
 
     @Query("SELECT r FROM Ride r " +
             "WHERE r.createdByUserId = :userId " +
-            "AND r.status IN (com.saferide.monolith.rides.model.entity.RideStatus.PENDING, " +
-            "                 com.saferide.monolith.rides.model.entity.RideStatus.ACCEPTED) " +
+            "AND r.status IN " + ACTIVE_STATUSES + " " +
             "ORDER BY r.createdAt DESC")
     List<Ride> findMyActiveRides(@Param("userId") UUID userId);
 
@@ -77,8 +114,7 @@ public interface RideRepository extends JpaRepository<Ride, UUID> {
      * co-passenger. Enforces "one ride at a time" on create / join / find.
      */
     @Query("SELECT COUNT(r) > 0 FROM Ride r " +
-            "WHERE r.status IN (com.saferide.monolith.rides.model.entity.RideStatus.PENDING, " +
-            "                   com.saferide.monolith.rides.model.entity.RideStatus.ACCEPTED) " +
+            "WHERE r.status IN " + ACTIVE_STATUSES + " " +
             "AND (r.createdByUserId = :userId " +
             "     OR r.id IN (SELECT p.ride.id FROM RideParticipants p WHERE p.userId = :userId))")
     boolean hasActiveRideOrJoined(@Param("userId") UUID userId);
@@ -88,8 +124,7 @@ public interface RideRepository extends JpaRepository<Ride, UUID> {
      * the "Your Rides" tab so a co-passenger's confirmed ride shows there too.
      */
     @Query("SELECT r FROM Ride r " +
-            "WHERE r.status IN (com.saferide.monolith.rides.model.entity.RideStatus.PENDING, " +
-            "                   com.saferide.monolith.rides.model.entity.RideStatus.ACCEPTED) " +
+            "WHERE r.status IN " + ACTIVE_STATUSES + " " +
             "AND (r.createdByUserId = :userId " +
             "     OR r.id IN (SELECT p.ride.id FROM RideParticipants p WHERE p.userId = :userId)) " +
             "ORDER BY r.createdAt DESC")
@@ -144,16 +179,28 @@ public interface RideRepository extends JpaRepository<Ride, UUID> {
     List<Ride> findDriverFeed();
 
     /**
+     * Scheduled rides still PENDING although their departure passed before
+     * {@code cutoff} — nobody ever drove them. On-demand rides (null
+     * departure) are excluded: they have no moment to be late for.
+     */
+    @Query("SELECT r FROM Ride r " +
+            "WHERE r.status = com.saferide.monolith.rides.model.entity.RideStatus.PENDING " +
+            "AND r.departureTime IS NOT NULL " +
+            "AND r.departureTime < :cutoff")
+    List<Ride> findExpiredScheduledRides(@Param("cutoff") Instant cutoff);
+
+    /**
      * Same as {@link #findDriverFeed} but spatially bounded to PENDING rides
-     * within {@code radiusMeters} of the driver, ordered nearest-first via the
-     * PostGIS GiST index on {@code pickup_geog}. No gender filter — drivers
-     * aren't gender-restricted. Native for the PostGIS operators.
+     * within {@code radiusMeters} of the driver, ordered nearest-first using
+     * {@link #PICKUP_DISTANCE_METERS}. No gender filter — drivers aren't
+     * gender-restricted.
      */
     @Query(value = "SELECT r.* FROM ride r "
             + "WHERE r.status = 'PENDING' "
             + "AND r.published_to_drivers = true "
-            + "AND ST_DWithin(r.pickup_geog, ST_SetSRID(ST_MakePoint(:lng, :lat), 4326)::geography, :radiusMeters) "
-            + "ORDER BY r.pickup_geog <-> ST_SetSRID(ST_MakePoint(:lng, :lat), 4326)::geography",
+            + "AND r.pickup_lat IS NOT NULL AND r.pickup_long IS NOT NULL "
+            + "AND " + PICKUP_DISTANCE_METERS + " <= :radiusMeters "
+            + "ORDER BY " + PICKUP_DISTANCE_METERS,
             nativeQuery = true)
     List<Ride> findDriverFeedNearby(@Param("lat") double lat,
                                     @Param("lng") double lng,
