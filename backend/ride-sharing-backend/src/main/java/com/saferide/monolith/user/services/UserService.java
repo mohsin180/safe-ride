@@ -2,11 +2,14 @@ package com.saferide.monolith.user.services;
 
 import com.saferide.monolith.user.exceptions.InvalidOnboardingTokenException;
 import com.saferide.monolith.user.exceptions.UserAlreadyExistException;
+import com.saferide.monolith.user.exceptions.GenderLockedException;
 import com.saferide.monolith.user.exceptions.UserNotFoundException;
 import io.jsonwebtoken.JwtException;
 import com.saferide.monolith.user.model.UserMapper;
 import com.saferide.monolith.user.model.Users;
 import com.saferide.monolith.user.model.dtos.*;
+import com.saferide.monolith.common.security.UserContext;
+import com.saferide.monolith.kyc.service.KycGuard;
 import com.saferide.monolith.user.repos.UserRepository;
 import com.saferide.monolith.user.security.AttemptLimiter;
 import com.saferide.monolith.user.security.JwtUtil;
@@ -14,9 +17,12 @@ import org.apache.coyote.BadRequestException;
 import org.springframework.security.authentication.AuthenticationManager;
 import org.springframework.security.authentication.BadCredentialsException;
 import org.springframework.security.authentication.UsernamePasswordAuthenticationToken;
+import org.springframework.security.core.Authentication;
+import org.springframework.security.core.context.SecurityContextHolder;
 import org.springframework.security.core.userdetails.UsernameNotFoundException;
 import org.springframework.security.crypto.password.PasswordEncoder;
 import org.springframework.stereotype.Service;
+import jakarta.transaction.Transactional;
 
 import java.util.UUID;
 
@@ -29,9 +35,10 @@ public class UserService {
     private final PasswordEncoder passwordEncoder;
     private final EmailVerificationService verificationService;
     private final AttemptLimiter attemptLimiter;
+    private final KycGuard kycGuard;
 
     public UserService(UserRepository userRepository, UserMapper userMapper, AuthenticationManager authenticationManager, JwtUtil jwtUtil, PasswordEncoder passwordEncoder, EmailVerificationService verificationService,
-                       AttemptLimiter attemptLimiter) {
+                       AttemptLimiter attemptLimiter, KycGuard kycGuard) {
         this.userRepository = userRepository;
         this.userMapper = userMapper;
         this.authenticationManager = authenticationManager;
@@ -39,6 +46,44 @@ public class UserService {
         this.passwordEncoder = passwordEncoder;
         this.verificationService = verificationService;
         this.attemptLimiter = attemptLimiter;
+        this.kycGuard = kycGuard;
+    }
+
+    /**
+     * Corrects the gender chosen at signup and hands back a fresh token.
+     *
+     * <p>Gender is a JWT claim and decides which rides an account can see, so
+     * the old token would keep asserting the old value — the caller must swap
+     * in the one returned here.
+     *
+     * <p>Refused once identity is verified: the value was matched against a
+     * scanned CNIC, and letting it move afterwards would leave a verified
+     * badge on a claim nobody checked.
+     */
+    @Transactional
+    public LoginResponse changeGender(GenderChangeRequest request) {
+        UserContext ctx = currentUser();
+        if (kycGuard.isVerified(ctx)) {
+            throw new GenderLockedException(
+                    "Your gender was verified against your CNIC and can't be changed.");
+        }
+        Users user = userRepository.findById(ctx.userId())
+                .orElseThrow(() -> new UserNotFoundException("User Not Found"));
+        if (user.getRole() == null) {
+            throw new UserNotFoundException("Finish signing up first");
+        }
+        user.setGender(Gender.valueOf(request.gender()));
+        userRepository.save(user);
+        return LoginResponse.builder()
+                .token(jwtUtil.generateToken(user.getId(), user.getRole().name(),
+                        user.getGender().name(), user.getEmail()))
+                .build();
+    }
+
+    /** The caller, per the JWT the security filter validated. */
+    private UserContext currentUser() {
+        Authentication authentication = SecurityContextHolder.getContext().getAuthentication();
+        return (UserContext) authentication.getDetails();
     }
 
     public UserResponse register(RegisterRequest request) {

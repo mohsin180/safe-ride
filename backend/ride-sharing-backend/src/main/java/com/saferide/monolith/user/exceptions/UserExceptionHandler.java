@@ -67,6 +67,12 @@ public class UserExceptionHandler {
         return new ResponseEntity<>(errorResponse, HttpStatus.NOT_FOUND);
     }
 
+    @ExceptionHandler(GenderLockedException.class)
+    public ResponseEntity<ErrorResponse> genderLockedException(GenderLockedException ex) {
+        ErrorResponse errorResponse = new ErrorResponse(HttpStatus.CONFLICT.value(), ex.getMessage());
+        return new ResponseEntity<>(errorResponse, HttpStatus.CONFLICT);
+    }
+
     @ExceptionHandler(UserAlreadyExistException.class)
     public ResponseEntity<ErrorResponse> UserAlreadyExistsException(UserAlreadyExistException ex) {
         ErrorResponse errorResponse = new ErrorResponse(HttpStatus.CONFLICT.value(), ex.getMessage());

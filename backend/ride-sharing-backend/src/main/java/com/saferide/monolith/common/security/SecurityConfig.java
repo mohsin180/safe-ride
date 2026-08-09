@@ -2,6 +2,7 @@ package com.saferide.monolith.common.security;
 
 import org.springframework.context.annotation.Bean;
 import org.springframework.context.annotation.Configuration;
+import org.springframework.http.HttpMethod;
 import org.springframework.http.HttpStatus;
 import org.springframework.security.authentication.AuthenticationManager;
 import org.springframework.security.config.Customizer;
@@ -43,6 +44,11 @@ public class SecurityConfig {
         return http.csrf(AbstractHttpConfigurer::disable)
                 .cors(Customizer.withDefaults())
                 .authorizeHttpRequests(auth -> auth
+                        // Listed before the wildcard below, which would
+                        // otherwise make it public: this one acts on the
+                        // caller's own record and needs a real token.
+                        .requestMatchers(HttpMethod.PUT, "/api/v1/auth/gender")
+                        .authenticated()
                         .requestMatchers("/api/v1/auth/**").permitAll()
                         .anyRequest().authenticated())
                 .sessionManagement(session ->
