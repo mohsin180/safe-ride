@@ -87,10 +87,6 @@ public class Ride {
      *  ride (falls back to a Haversine estimate). */
     private Double hostLegKm;
     private Integer hostLegMin;
-    /** When the host wants to leave. Null = on-demand ("leave now"); a future
-     *  instant = a scheduled ride. Drives the "scheduled" badge, feed ordering,
-     *  and lets riders plan ahead. */
-    private Instant departureTime;
     @CreationTimestamp
     @Column(nullable = false, updatable = false)
     private Instant createdAt;

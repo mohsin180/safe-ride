@@ -43,6 +43,18 @@ public class JwtAuthFilter extends OncePerRequestFilter {
             "/api/v1/auth/"
     );
 
+    /**
+     * Endpoints that sit under a public prefix but act on the caller's own
+     * record, so they still need the token parsed here. SecurityConfig marks
+     * them {@code authenticated()}; without this exemption the prefix match
+     * below would skip token parsing, leave the SecurityContext empty, and
+     * every call would 401 no matter how valid the Bearer token was.
+     * Keep in sync with the explicit matchers in SecurityConfig.
+     */
+    private static final Map<String, String> AUTHENTICATED_UNDER_PUBLIC_PREFIX = Map.of(
+            "/api/v1/auth/gender", "PUT"
+    );
+
     private static final List<String> IDENTITY_HEADERS = List.of(
             "X-User-Id", "X-User-Role", "X-User-Gender", "X-User-Email"
     );
@@ -59,7 +71,8 @@ public class JwtAuthFilter extends OncePerRequestFilter {
                                     FilterChain filterChain) throws ServletException, IOException {
         String path = request.getRequestURI();
 
-        if (isPublicPath(path) || "OPTIONS".equalsIgnoreCase(request.getMethod())) {
+        if (isPublicPath(path, request.getMethod())
+                || "OPTIONS".equalsIgnoreCase(request.getMethod())) {
             // Never trust client-sent identity headers, even on public paths.
             filterChain.doFilter(new IdentityHeaderRewriter(request, Map.of()), response);
             return;
@@ -107,7 +120,10 @@ public class JwtAuthFilter extends OncePerRequestFilter {
         }
     }
 
-    private boolean isPublicPath(String path) {
+    private boolean isPublicPath(String path, String method) {
+        if (method.equalsIgnoreCase(AUTHENTICATED_UNDER_PUBLIC_PREFIX.get(path))) {
+            return false;
+        }
         return PUBLIC_PATHS.stream().anyMatch(path::startsWith);
     }
 

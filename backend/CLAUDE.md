@@ -20,6 +20,22 @@ This file provides guidance to Claude Code (claude.ai/code) when working with co
 
 ---
 
+## Signup: an account exists only when it is complete
+
+**There is no such thing as a half-made account.** Everything a user types on the way in — credentials, role, profile, vehicle, KYC progress — lives in a single `pending_signup` row (`user/model/PendingSignup.java`) and nowhere else. `OnboardingService.promote()` is the **only** code in the system that inserts into `users`, and it runs at exactly one moment: the poll that first sees KYC APPROVED. In that one transaction it creates `users` + the driver/passenger profile (+ vehicle), copies the KYC verdict onto the profile, deletes the staging row and its verification tokens, and returns the account's first real JWT.
+
+Consequences worth knowing before changing anything here:
+
+- **The KYC gate isn't enforced, it's unreachable.** An unfinished signup never holds a session token — only the onboarding token, which carries no role and `JwtAuthFilter` rejects for every ordinary endpoint. So a pending user can't touch a ride endpoint even calling the API directly. The `KycGuard.requireVerified` calls left in the ride paths are now belt-and-braces, not the mechanism.
+- **A session token means the account is finished.** Client routing depends on this: `sessionRouter.dart` returns the navbar for any valid token and asks the server for the stage otherwise. Never issue a token anywhere but `promote()`.
+- **Onboarding endpoints** live under `/api/v1/auth/onboarding/**` (`OnboardingController`) so they fall inside the public `/api/v1/auth/**` matcher; each authorises itself by parsing the onboarding token from the `Authorization` header, exactly as `/select-role` always did. Every one answers with the same `OnboardingStateResponse`, whose `stage` the app routes on — it never infers the step from which lookups succeed.
+- `POST /select-role` **no longer issues a token** (it used to, which is how users reached the app with no profile and no verified identity).
+- **Email verification** belongs to `pending_signup`, not `users` — `EmailVerificationToken.pendingSignup`. A `users` row is verified by construction. The old `users_id` column was dropped by hand; `ddl-auto=update` won't do that for you.
+- **Gender changes** during signup go to `POST /auth/onboarding/gender` (free — nothing is verified yet). `PUT /auth/gender` serves real accounts and always refuses, since by then the value carries a checked CNIC.
+- `AbandonedSignupSweeper` deletes pending rows older than `app.signup.abandon-after-days` (default 7). Without it a stalled attempt would hold its email address hostage forever, since registration refuses an address present in *either* table.
+
+---
+
 ## LEGACY: the original microservices (moved to /Users/novaratech/Documents/projects/microservices/)
 
 The original architecture was a multi-module Spring Boot microservices project. Each module is an independent Maven project (no parent POM at the root) with its own `mvnw`/`pom.xml`:

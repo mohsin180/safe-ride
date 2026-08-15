@@ -15,6 +15,15 @@ public interface EmailVerificationTokenRepo extends JpaRepository<EmailVerificat
     Optional<EmailVerificationToken> findByTokenHash(String tokenHash);
 
     @Modifying
-    @Query("UPDATE EmailVerificationToken t SET t.used =true where t.users.id =:userId AND t.used=false")
-    void invalidateUnusedTokensByUserId(@Param("userId") UUID userId);
+    @Query("UPDATE EmailVerificationToken t SET t.used = true "
+            + "WHERE t.pendingSignup.id = :pendingId AND t.used = false")
+    void invalidateUnusedTokensByPendingId(@Param("pendingId") UUID pendingId);
+
+    /**
+     * Tokens belonging to a signup that's being deleted (promoted or swept).
+     * The FK would otherwise refuse the delete.
+     */
+    @Modifying
+    @Query("DELETE FROM EmailVerificationToken t WHERE t.pendingSignup.id = :pendingId")
+    void deleteByPendingId(@Param("pendingId") UUID pendingId);
 }

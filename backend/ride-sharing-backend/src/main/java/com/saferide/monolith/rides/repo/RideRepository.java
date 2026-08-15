@@ -179,17 +179,6 @@ public interface RideRepository extends JpaRepository<Ride, UUID> {
     List<Ride> findDriverFeed();
 
     /**
-     * Scheduled rides still PENDING although their departure passed before
-     * {@code cutoff} — nobody ever drove them. On-demand rides (null
-     * departure) are excluded: they have no moment to be late for.
-     */
-    @Query("SELECT r FROM Ride r " +
-            "WHERE r.status = com.saferide.monolith.rides.model.entity.RideStatus.PENDING " +
-            "AND r.departureTime IS NOT NULL " +
-            "AND r.departureTime < :cutoff")
-    List<Ride> findExpiredScheduledRides(@Param("cutoff") Instant cutoff);
-
-    /**
      * Same as {@link #findDriverFeed} but spatially bounded to PENDING rides
      * within {@code radiusMeters} of the driver, ordered nearest-first using
      * {@link #PICKUP_DISTANCE_METERS}. No gender filter — drivers aren't

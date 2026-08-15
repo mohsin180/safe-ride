@@ -23,14 +23,17 @@ import java.util.List;
 import java.util.Objects;
 
 /**
- * Identity verification (CNIC + liveness) via Didit, for drivers and
- * passengers alike. The flow is: the app asks us to start a session, we hand
- * back Didit's hosted URL (the scan and selfie happen there), then the app
- * polls {@link #getStatus()} while we poll Didit server-side and fold the
- * result into the caller's profile.
+ * Identity verification (CNIC + liveness) via Didit. The flow is: the caller
+ * asks us to start a session, we hand back Didit's hosted URL (the scan and
+ * selfie happen there), then the caller polls while we poll Didit server-side
+ * and fold the result into their record.
  *
- * <p>Which profile is touched follows the JWT's role, so one pair of
- * endpoints serves both onboarding wizards.
+ * <p>The subject of a verification is anything {@link KycVerifiable}: during
+ * signup it's the {@code PendingSignup} row (no account exists yet — that's
+ * the whole point), and afterwards it's the driver or passenger profile.
+ * {@link #start} and {@link #refresh} hold the actual Didit logic and are
+ * blind to which; the authenticated wrappers below just resolve the caller's
+ * profile and persist. One code path, so the two entry points can't drift.
  */
 @Service
 public class KycService {
@@ -55,46 +58,45 @@ public class KycService {
         this.enforceDocumentMatch = enforceDocumentMatch;
     }
 
+    // ── Subject-agnostic core ───────────────────────────────────────────
+
     /**
-     * Creates a fresh Didit session for the authenticated user and returns
-     * the hosted verification URL. Re-invoking after a decline/expiry simply
-     * starts a new session; an already-approved user gets APPROVED back
-     * without a new session.
+     * Opens a Didit session against {@code subject}, mutating it in place;
+     * the caller persists. Re-invoking after a decline or expiry starts a new
+     * session; an already-approved subject is returned untouched.
+     *
+     * @param subjectId the reference handed to Didit — a pending signup id
+     *                  during onboarding, a user id afterwards
      */
-    @Transactional
-    public KycStatusResponse startVerification() {
-        UserContext ctx = currentUser();
-        KycVerifiable profile = requireProfile(ctx);
-        if (currentStatus(profile) == KycStatus.APPROVED) {
-            return KycStatusResponse.of(KycStatus.APPROVED, profile.getKycVerifiedAt());
+    public KycStatusResponse start(KycVerifiable subject, String subjectId) {
+        if (currentStatus(subject) == KycStatus.APPROVED) {
+            return KycStatusResponse.of(KycStatus.APPROVED, subject.getKycVerifiedAt());
         }
-        DiditClient.DiditSession session = diditClient.createSession(ctx.userId().toString());
-        profile.setKycSessionId(session.sessionId());
-        profile.setKycStatus(KycStatus.IN_PROGRESS);
+        DiditClient.DiditSession session = diditClient.createSession(subjectId);
+        subject.setKycSessionId(session.sessionId());
+        subject.setKycStatus(KycStatus.IN_PROGRESS);
         // A retry starts clean — the previous attempt's reason no longer applies.
-        profile.setKycRejectionReason(null);
-        save(profile);
+        subject.setKycRejectionReason(null);
         return new KycStatusResponse(
                 KycStatus.IN_PROGRESS.name(), session.token(), session.url(), null, null);
     }
 
     /**
-     * The caller's current KYC state. Non-terminal states trigger a live poll
-     * of Didit's decision endpoint; the mapped result is persisted so the
-     * status survives restarts and is visible on the profile.
+     * Polls Didit for a non-terminal session and folds the decision into
+     * {@code subject}, mutating it in place; the caller persists.
+     *
+     * @param accountGender the gender the account claims, cross-checked
+     *                      against the scanned document
+     * @return the status after the poll
      */
-    @Transactional
-    public KycStatusResponse getStatus() {
-        UserContext ctx = currentUser();
-        KycVerifiable profile = requireProfile(ctx);
-        KycStatus status = currentStatus(profile);
-
+    public KycStatus refresh(KycVerifiable subject, String accountGender) {
+        KycStatus status = currentStatus(subject);
         if (status == KycStatus.APPROVED || status == KycStatus.NOT_STARTED
-                || profile.getKycSessionId() == null) {
-            return response(profile, status);
+                || subject.getKycSessionId() == null) {
+            return status;
         }
 
-        DiditClient.DiditDecision decision = diditClient.getDecision(profile.getKycSessionId());
+        DiditClient.DiditDecision decision = diditClient.getDecision(subject.getKycSessionId());
         KycStatus mapped = mapDiditStatus(decision.status());
         String rejectionReason = null;
 
@@ -102,7 +104,7 @@ public class KycService {
             // Didit vouches for the document and the face; it has no idea
             // whether the account matches the person on the card. That last
             // step is ours.
-            List<String> problems = documentCheck.findMismatches(decision, profile, ctx.gender());
+            List<String> problems = documentCheck.findMismatches(decision, subject, accountGender);
             if (!problems.isEmpty()) {
                 mapped = KycStatus.DECLINED;
                 rejectionReason = "We couldn't verify you because "
@@ -110,20 +112,55 @@ public class KycService {
             }
         }
 
-        if (mapped != status || !Objects.equals(rejectionReason, profile.getKycRejectionReason())) {
-            profile.setKycStatus(mapped);
-            profile.setKycRejectionReason(rejectionReason);
+        if (mapped != status || !Objects.equals(rejectionReason, subject.getKycRejectionReason())) {
+            subject.setKycStatus(mapped);
+            subject.setKycRejectionReason(rejectionReason);
             if (mapped == KycStatus.APPROVED) {
-                profile.setKycVerifiedAt(LocalDateTime.now());
+                subject.setKycVerifiedAt(LocalDateTime.now());
             }
             if (mapped == KycStatus.NOT_STARTED) {
                 // Session died (expired/abandoned) — clear it so a retry
                 // starts clean.
-                profile.setKycSessionId(null);
+                subject.setKycSessionId(null);
             }
-            save(profile);
         }
-        return response(profile, mapped);
+        return mapped;
+    }
+
+    /** The response shape for a subject in a given status. */
+    public KycStatusResponse describe(KycVerifiable subject, KycStatus status) {
+        return new KycStatusResponse(status.name(), null, null,
+                subject.getKycVerifiedAt(), subject.getKycRejectionReason());
+    }
+
+    /** Existing rows predate the KYC columns, so a null status means NOT_STARTED. */
+    public KycStatus currentStatus(KycVerifiable subject) {
+        return subject.getKycStatus() == null ? KycStatus.NOT_STARTED : subject.getKycStatus();
+    }
+
+    // ── Authenticated (post-onboarding) entry points ────────────────────
+
+    /**
+     * Re-verification for an account that already exists — a profile edit that
+     * changed a checked field, or an admin-forced recheck. Signup verification
+     * does not come through here: no account exists at that point.
+     */
+    @Transactional
+    public KycStatusResponse startVerification() {
+        UserContext ctx = currentUser();
+        KycVerifiable profile = requireProfile(ctx);
+        KycStatusResponse response = start(profile, ctx.userId().toString());
+        save(profile);
+        return response;
+    }
+
+    @Transactional
+    public KycStatusResponse getStatus() {
+        UserContext ctx = currentUser();
+        KycVerifiable profile = requireProfile(ctx);
+        KycStatus status = refresh(profile, ctx.gender());
+        save(profile);
+        return describe(profile, status);
     }
 
     /**
@@ -147,11 +184,6 @@ public class KycService {
         return false;
     }
 
-    private KycStatusResponse response(KycVerifiable profile, KycStatus status) {
-        return new KycStatusResponse(status.name(), null, null,
-                profile.getKycVerifiedAt(), profile.getKycRejectionReason());
-    }
-
     /**
      * Collapses Didit's case-sensitive session statuses into our state
      * machine. Anything still moving ("In Progress", "Awaiting User",
@@ -165,11 +197,6 @@ public class KycService {
             case "Expired", "Abandoned", "Kyc Expired" -> KycStatus.NOT_STARTED;
             default -> KycStatus.IN_PROGRESS;
         };
-    }
-
-    /** Existing rows predate the KYC columns, so a null status means NOT_STARTED. */
-    private KycStatus currentStatus(KycVerifiable profile) {
-        return profile.getKycStatus() == null ? KycStatus.NOT_STARTED : profile.getKycStatus();
     }
 
     /** The driver or passenger profile of the caller, per their JWT role. */

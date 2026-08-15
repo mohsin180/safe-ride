@@ -15,7 +15,8 @@ import org.springframework.scheduling.annotation.EnableScheduling;
  */
 @SpringBootApplication
 @EnableAsync
-// Drives StaleRideSweeper, which retires scheduled rides nobody drove.
+// Drives AbandonedSignupSweeper, which frees the email addresses of signups
+// nobody finished.
 @EnableScheduling
 @EnableJpaAuditing
 @EnableConfigurationProperties(PricingProperties.class)

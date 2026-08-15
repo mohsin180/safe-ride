@@ -2,6 +2,7 @@ package com.saferide.monolith.user.controller;
 
 import com.saferide.monolith.user.model.dtos.*;
 import com.saferide.monolith.user.services.EmailVerificationService;
+import com.saferide.monolith.user.services.OnboardingService;
 import com.saferide.monolith.user.services.PasswordResetService;
 import com.saferide.monolith.user.services.UserService;
 import jakarta.validation.Valid;
@@ -14,21 +15,27 @@ import org.springframework.web.bind.annotation.*;
 @RequestMapping("/api/v1/auth")
 public class UserController {
     private final UserService userService;
+    private final OnboardingService onboardingService;
     private final EmailVerificationService emailVerificationService;
     private final PasswordResetService passwordResetService;
 
     public UserController(UserService userService,
+                          OnboardingService onboardingService,
                           EmailVerificationService emailVerificationService,
                           PasswordResetService passwordResetService) {
         this.userService = userService;
+        this.onboardingService = onboardingService;
         this.emailVerificationService = emailVerificationService;
         this.passwordResetService = passwordResetService;
     }
 
+    /**
+     * Starts a signup. Creates no account — only a {@code pending_signup} row
+     * and the onboarding token that authorises the rest of the way in.
+     */
     @PostMapping("/register")
     public ResponseEntity<UserResponse> register(@Valid @RequestBody RegisterRequest request) {
-        UserResponse register = userService.register(request);
-        return ResponseEntity.ok(register);
+        return ResponseEntity.ok(onboardingService.register(request));
     }
 
     @PostMapping("/login")
@@ -38,16 +45,20 @@ public class UserController {
     }
 
     /**
-     * Finishes signup. Authorised by the onboarding token from /register or
-     * from a login that reported {@code roleRequired} — not by a user id in
-     * the URL, which anyone could supply.
+     * Records the chosen role. Authorised by the onboarding token from
+     * /register or from a login that reported an unfinished stage — not by a
+     * user id in the URL, which anyone could supply.
+     *
+     * <p>No longer issues a token: a role is the second of five steps, and
+     * handing out a session here is exactly what let people reach the app
+     * with no profile and no verified identity.
      */
     @PostMapping("/select-role")
-    public ResponseEntity<LoginResponse> selectRole(
+    public ResponseEntity<OnboardingStateResponse> selectRole(
             @RequestHeader(value = "Authorization", required = false) String authorization,
             @Valid @RequestBody RoleSelection role) {
-        LoginResponse response = userService.selectRole(stripBearer(authorization), role);
-        return ResponseEntity.ok(response);
+        return ResponseEntity.ok(
+                onboardingService.selectRole(stripBearer(authorization), role));
     }
 
     private String stripBearer(String authorization) {

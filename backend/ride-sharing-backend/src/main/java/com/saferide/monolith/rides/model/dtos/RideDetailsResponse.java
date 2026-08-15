@@ -24,8 +24,6 @@ public class RideDetailsResponse {
     private String rideType;
     private String status;
     private OffsetDateTime createdAt;
-    /** Scheduled departure; null = on-demand ("leave now"). */
-    private Instant departureTime;
     /** The VIEWER's own booked seats — the host's party for the host, a
      *  co-passenger's chosen seats for them. Null for a non-member browsing. */
     private Integer yourSeats;
@@ -44,6 +42,14 @@ public class RideDetailsResponse {
      *  multi-stop polyline. Unordered; the client orders by shortest path. */
     private List<StopDto> stops;
     private FareDto fare;
+    /**
+     * Whether the viewer created this ride. Decided here because the server
+     * knows who is asking; the app used to compare the host's id against a
+     * user id held in memory, which is null on any cold start — so a host
+     * reopening their own ride was offered "Confirm Ride" (a joiner's action)
+     * instead of "Publish to drivers".
+     */
+    private Boolean youAreHost;
     private Boolean youHaveJoined;
     /** Whether the host has published this ride to the driver feed yet.
      *  Drives the host's "Publish to drivers" vs "Waiting for a driver" CTA. */

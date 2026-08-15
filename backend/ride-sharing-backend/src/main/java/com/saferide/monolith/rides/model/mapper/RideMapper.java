@@ -18,9 +18,6 @@ public interface RideMapper {
     @Mapping(target = "destination.longitude", source = "dropLng")
     @Mapping(target = "totalSeats", source = "seats")
     @Mapping(target = "availableSeats", source = "seats")
-    // departureTime is set in RideService.createRide (only if it's in the
-    // future), so don't let the mapper copy a past/immediate value straight in.
-    @Mapping(target = "departureTime", ignore = true)
     Ride toRide(CreateRideRequest request);
 
     @Mapping(target = "passengerId", source = "createdByUserId")

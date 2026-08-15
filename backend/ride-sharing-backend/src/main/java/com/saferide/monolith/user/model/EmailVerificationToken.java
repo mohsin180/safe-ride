@@ -20,9 +20,15 @@ public class EmailVerificationToken {
     @GeneratedValue(strategy = GenerationType.UUID)
     private UUID id;
 
+    /**
+     * The signup being verified — never a {@link Users}, because a row in that
+     * table only exists after onboarding finished, and finishing requires a
+     * verified email. So by construction there is no verified-user-needing-
+     * verification case for this token to point at.
+     */
     @ManyToOne(fetch = FetchType.LAZY)
-    @JoinColumn(name = "users_id", nullable = false)
-    private Users users;
+    @JoinColumn(name = "pending_signup_id", nullable = false)
+    private PendingSignup pendingSignup;
     @Column(nullable = false, unique = true, name = "token_hash")
     private String tokenHash;
     @Column(nullable = false)

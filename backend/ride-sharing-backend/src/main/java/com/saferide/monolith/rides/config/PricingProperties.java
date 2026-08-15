@@ -13,18 +13,14 @@ public class PricingProperties {
 
     /** Flat pickup charge applied to every trip. */
     private double baseFare = 50.0;
-    /** Charge per km of road distance. */
-    private double perKm = 20.0;
-    /** Charge per minute of trip duration. */
-    private double perMin = 2.0;
     /**
-     * Surcharge per EXTRA seat a rider books, as a fraction of their own
-     * share. Booking 3 seats costs {@code share * (1 + 2 * rate)}. The trip
-     * costs the same to drive however many seats one rider takes, but holding
-     * seats empty stops anyone else joining — this prices that in.
+     * Charge per km of road distance — the only thing that varies the fare.
+     * Trip duration is deliberately not priced: two riders stuck in the same
+     * traffic shouldn't owe more than the same two on a clear road, and
+     * nobody can predict it when they agree to a fare.
      */
-    private double seatSurchargeRate = 0.15;
-    /** Gross multiplier applied to PREMIUM rides. */
+    private double perKm = 20.0;
+    /** Multiplier applied to PREMIUM rides. */
     private double premiumMultiplier = 1.5;
     /** Floor the gross trip fare never drops below. */
     private double minFare = 80.0;
@@ -58,22 +54,6 @@ public class PricingProperties {
 
     public void setPerKm(double perKm) {
         this.perKm = perKm;
-    }
-
-    public double getPerMin() {
-        return perMin;
-    }
-
-    public void setPerMin(double perMin) {
-        this.perMin = perMin;
-    }
-
-    public double getSeatSurchargeRate() {
-        return seatSurchargeRate;
-    }
-
-    public void setSeatSurchargeRate(double seatSurchargeRate) {
-        this.seatSurchargeRate = seatSurchargeRate;
     }
 
     public double getPremiumMultiplier() {

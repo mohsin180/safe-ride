@@ -4,9 +4,9 @@ import com.saferide.monolith.user.exceptions.InvalidTokenException;
 import com.saferide.monolith.user.exceptions.UserNotFoundException;
 import com.saferide.monolith.user.security.AttemptLimiter;
 import com.saferide.monolith.user.model.EmailVerificationToken;
-import com.saferide.monolith.user.model.Users;
+import com.saferide.monolith.user.model.PendingSignup;
 import com.saferide.monolith.user.repos.EmailVerificationTokenRepo;
-import com.saferide.monolith.user.repos.UserRepository;
+import com.saferide.monolith.user.repos.PendingSignupRepository;
 import com.saferide.monolith.user.security.HashedVerificationToken;
 import jakarta.transaction.Transactional;
 import lombok.extern.slf4j.Slf4j;
@@ -15,39 +15,46 @@ import org.springframework.stereotype.Service;
 
 import java.time.LocalDateTime;
 
+/**
+ * Email verification, which now happens entirely against a
+ * {@link PendingSignup} — there is no verified-or-not state on a real account
+ * to maintain, because an account is only created once its email was proven.
+ */
 @Service
 @Slf4j
 public class EmailVerificationService {
 
-    private final UserRepository userRepository;
+    private final PendingSignupRepository pendingSignupRepository;
     private final MailService mailService;
     private final EmailVerificationTokenRepo tokenRepo;
     private final AttemptLimiter attemptLimiter;
     @Value("${app.verification.token-expiry-hours}")
     private int tokenExpiry;
 
-    public EmailVerificationService(UserRepository userRepository, MailService mailService,
-                                    EmailVerificationTokenRepo tokenRepo, AttemptLimiter attemptLimiter) {
-        this.userRepository = userRepository;
+    public EmailVerificationService(PendingSignupRepository pendingSignupRepository,
+                                    MailService mailService,
+                                    EmailVerificationTokenRepo tokenRepo,
+                                    AttemptLimiter attemptLimiter) {
+        this.pendingSignupRepository = pendingSignupRepository;
         this.mailService = mailService;
         this.tokenRepo = tokenRepo;
         this.attemptLimiter = attemptLimiter;
     }
 
     @Transactional
-    public void createAndSendVerification(Users users) {
+    public void createAndSendVerification(PendingSignup signup) {
         String rawToken = HashedVerificationToken.generateRawToken();
         String hashToken = HashedVerificationToken.hashToken(rawToken);
         EmailVerificationToken verificationToken = EmailVerificationToken
                 .builder()
-                .users(users)
+                .pendingSignup(signup)
                 .tokenHash(hashToken)
                 .expiresAt(LocalDateTime.now().plusHours(tokenExpiry))
                 .used(false)
                 .build();
         tokenRepo.save(verificationToken);
-        mailService.sendEmail(users.getEmail(), rawToken);
-        log.info("Verification token created for user id={}", users.getId());
+        mailService.sendEmail(signup.getEmail(), rawToken);
+        log.info("Verification token created for pending signup id={}", signup.getId());
     }
 
     @Transactional
@@ -68,10 +75,10 @@ public class EmailVerificationService {
         }
         verificationToken.setUsed(true);
         tokenRepo.save(verificationToken);
-        Users users = verificationToken.getUsers();
-        users.setEmailVerified(true);
-        userRepository.save(users);
-        log.info("Email verified successfully for user id={}", users.getId());
+        PendingSignup signup = verificationToken.getPendingSignup();
+        signup.setEmailVerified(true);
+        pendingSignupRepository.save(signup);
+        log.info("Email verified successfully for pending signup id={}", signup.getId());
     }
 
     @Transactional
@@ -79,15 +86,15 @@ public class EmailVerificationService {
         // Unbounded, this endpoint could flood an inbox and burn the app's
         // SMTP quota; the address is the natural budget key.
         attemptLimiter.check("resend the verification email", email);
-        Users users = userRepository.findByEmail(email).orElseThrow(
+        PendingSignup signup = pendingSignupRepository.findByEmail(email).orElseThrow(
                 () -> new UserNotFoundException("Email was not found")
         );
-        if (users.isEmailVerified()) {
-            log.debug("Resend verification requested for already-verified user id={}", users.getId());
+        if (signup.isEmailVerified()) {
+            log.debug("Resend verification requested for already-verified signup id={}", signup.getId());
             return;
         }
-        tokenRepo.invalidateUnusedTokensByUserId(users.getId());
-        log.warn("Invalidated old unused tokens for user id={}", users.getId());
-        createAndSendVerification(users);
+        tokenRepo.invalidateUnusedTokensByPendingId(signup.getId());
+        log.warn("Invalidated old unused tokens for pending signup id={}", signup.getId());
+        createAndSendVerification(signup);
     }
 }

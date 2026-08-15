@@ -26,9 +26,20 @@ public class AvailableRideResponse {
      *  route stored at creation — so the card can show trip length up front. */
     private Double tripDistanceKm;
     private Integer tripDurationMin;
-    /** Scheduled departure; null = on-demand ("leave now"). */
-    private Instant departureTime;
+    /**
+     * What THIS viewer pays: their own share if they're already on the ride,
+     * otherwise what they'd pay to join. The passenger feed, the host's own
+     * "Your Rides" card and the ride-details screen all show this same number,
+     * so a fare never changes just because the user moved between screens.
+     */
     private Double fareForRider;
+    /**
+     * The whole trip's fare — every rider's share added up, which is exactly
+     * what the driver collects. This is the driver's number; it was previously
+     * shown a per-rider estimate labelled as the trip total, so drivers saw
+     * roughly half of what they'd actually earn.
+     */
+    private Double tripFare;
     private String pickup;
     private String drop;
     private Double pickupLat;

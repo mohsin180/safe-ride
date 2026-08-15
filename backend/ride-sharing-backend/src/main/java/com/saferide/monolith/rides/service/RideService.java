@@ -216,27 +216,6 @@ public class RideService {
         // NOT auto-published: the host decides when the ride goes to the
         // driver feed via the "Publish to drivers" button — e.g. after
         // gathering co-passengers first.
-        // Scheduled ride. A clearly-past or absurdly-distant time is rejected
-        // rather than dropped: silently storing null let a client believe it
-        // had scheduled a ride that was actually created as on-demand.
-        if (request.departureTime() != null) {
-            Instant now = Instant.now();
-            if (request.departureTime().isBefore(now.minus(DEPARTURE_GRACE))) {
-                throw new IllegalArgumentException(
-                        "Departure time is in the past — pick a future time or leave now.");
-            }
-            if (request.departureTime().isAfter(now.plus(MAX_SCHEDULE_AHEAD))) {
-                throw new IllegalArgumentException(
-                        "Rides can only be scheduled up to "
-                                + MAX_SCHEDULE_AHEAD.toDays() + " days ahead.");
-            }
-            // Within the grace window counts as "leave now", so a slow submit
-            // on a just-now time doesn't fail.
-            if (request.departureTime().isAfter(now)) {
-                ride.setDepartureTime(request.departureTime());
-            }
-        }
-
         // Resolve & persist the trip's road distance/duration so pricing is
         // server-authoritative and stable. Prefer the Geoapify routing API;
         // if it's unavailable (no key / network / parse error) fall back to a
@@ -449,8 +428,7 @@ public class RideService {
             throw new IllegalArgumentException("Seats must be between 1 and " + MAX_SEATS);
         }
         double[] m = simulatedRouteMetrics(ride, pickupLat, pickupLng, dropLat, dropLng);
-        double gross = Math.round(priceService.grossFromMetrics(
-                m[0], m[1], ride.getRideType()) * 100.0) / 100.0;
+        double gross = priceService.fareForKm(m[0], ride.getRideType());
         double leg = priceService.distanceKm(pickupLat, pickupLng, dropLat, dropLng);
         Map<UUID, Double> shares = priceService.previewShares(
                 ride, PREVIEW_CANDIDATE, leg, seats, gross);
@@ -481,8 +459,7 @@ public class RideService {
         Double pLat = jr.getPickupLat(); Double pLng = jr.getPickupLng();
         Double dLat = jr.getDropLat(); Double dLng = jr.getDropLng();
         double[] m = simulatedRouteMetrics(ride, pLat, pLng, dLat, dLng);
-        double gross = Math.round(priceService.grossFromMetrics(
-                m[0], m[1], ride.getRideType()) * 100.0) / 100.0;
+        double gross = priceService.fareForKm(m[0], ride.getRideType());
         double leg = (pLat != null && pLng != null && dLat != null && dLng != null)
                 ? priceService.distanceKm(pLat, pLng, dLat, dLng)
                 : 1.0;
@@ -938,15 +915,6 @@ public class RideService {
                         currentUserId, riderGender.name(), lat, lng, SEARCH_RADIUS_KM * 1000)
                 : rideRepository.findAvailableRides(currentUserId, riderGender);
 
-        // Scheduled rides stay browsable — planning ahead is the point — but
-        // one whose departure already passed is not joinable. StaleRideSweeper
-        // cancels these; this covers the gap between departure and the sweep.
-        Instant departedBefore = Instant.now();
-        rides = rides.stream()
-                .filter(r -> r.getDepartureTime() == null
-                        || r.getDepartureTime().isAfter(departedBefore))
-                .toList();
-
         // Keep blocked users apart: hide rides hosted by someone the viewer has
         // blocked, or who has blocked the viewer.
         Set<UUID> blocked = blockedRelatedTo(currentUserId);
@@ -1008,8 +976,11 @@ public class RideService {
         List<Ride> rides = rideRepository.findMyActiveOrJoinedRides(userId);
 
         // Resolve summaries (name + rating) for every host, including the
-        // current user for their own rides — so the host card shows real
-        // rating/trips instead of dashes. hostName is still "You" for mine.
+        // current user for their own rides — the card shows the host's real
+        // name even when that host is the viewer. It used to substitute "You",
+        // which told them nothing they didn't already know and left the card
+        // without the one label that identifies whose ride it is. Use
+        // youAreHost, not the name, to tell the two apart.
         Map<UUID, PassengerSummary> hosts = fetchPassengerSummaries(
                 rides.stream()
                         .map(Ride::getCreatedByUserId)
@@ -1021,7 +992,7 @@ public class RideService {
                     boolean mine = hostId.equals(userId);
                     return AvailableRideResponse.builder()
                             .id(r.getId().toString())
-                            .hostName(mine ? "You" : resolveName(hosts, hostId))
+                            .hostName(resolveName(hosts, hostId))
                             .hostRating(resolveRating(hosts, hostId))
                             .hostRatingCount((int) ratingRepository.countByRatedId(hostId))
                             .hostTrips((int) rideRepository
@@ -1032,10 +1003,15 @@ public class RideService {
                             // lost the schedule and rendered their scheduled
                             // ride as "Leave now", while everyone else's feed
                             // showed the correct time.
-                            .departureTime(r.getDepartureTime())
                             .tripDistanceKm(r.getRouteDistanceKm())
                             .tripDurationMin(r.getRouteDurationMin())
-                            .fareForRider(priceService.estimateRiderFare(r))
+                            // The viewer's REAL share — they host this ride or
+                            // joined it, so they have one. The old estimate
+                            // divided by the rider count plus one, quoting a
+                            // host riding alone half of what they actually owed.
+                            .fareForRider(priceService.computeShares(r)
+                                    .getOrDefault(userId, priceService.tripFare(r)))
+                            .tripFare(priceService.tripFare(r))
                             .pickup(r.getPickup() != null ? r.getPickup().getAddress() : null)
                             .drop(r.getDestination() != null ? r.getDestination().getAddress() : null)
                             .pickupLat(r.getPickup() != null ? r.getPickup().getLatitude() : null)
@@ -1063,15 +1039,6 @@ public class RideService {
         List<Ride> rides = (lat != null && lng != null)
                 ? rideRepository.findDriverFeedNearby(lat, lng, DRIVER_SEARCH_RADIUS_KM * 1000)
                 : rideRepository.findDriverFeed();
-
-        // Only rides leaving now (or nearly). A driver claiming next week's
-        // ride would burn their one active-ride slot for days, and it would
-        // sit here looking like work available right now.
-        Instant claimableUntil = Instant.now().plus(DRIVER_FEED_LEAD_TIME);
-        rides = rides.stream()
-                .filter(r -> r.getDepartureTime() == null
-                        || !r.getDepartureTime().isAfter(claimableUntil))
-                .toList();
 
         // Hide rides this driver has dismissed so they don't reappear each poll.
         Set<UUID> declined = new HashSet<>(
@@ -1669,8 +1636,8 @@ public class RideService {
                 .distanceKm(distanceKm)
                 .tripDistanceKm(r.getRouteDistanceKm())
                 .tripDurationMin(r.getRouteDurationMin())
-                .departureTime(r.getDepartureTime())
                 .fareForRider(fareForRider)
+                .tripFare(priceService.tripFare(r))
                 .pickup(r.getPickup() != null ? r.getPickup().getAddress() : null)
                 .drop(r.getDestination() != null ? r.getDestination().getAddress() : null)
                 .pickupLat(pickupLat)
@@ -1894,7 +1861,6 @@ public class RideService {
                 .rideType(ride.getRideType() != null ? ride.getRideType().name() : null)
                 .status(ride.getStatus() != null ? ride.getStatus().name() : null)
                 .createdAt(createdAt)
-                .departureTime(ride.getDepartureTime())
                 .yourSeats(yourSeats)
                 .tripDistanceKm(ride.getRouteDistanceKm())
                 .tripDurationMin(ride.getRouteDurationMin())
@@ -1904,6 +1870,7 @@ public class RideService {
                 .coPassengers(coPassengers)
                 .stops(stops)
                 .fare(fare)
+                .youAreHost(hostId.equals(viewerId))
                 .youHaveJoined(youHaveJoined)
                 .youHaveRequested(youHaveRequested)
                 .publishedToDrivers(ride.isPublishedToDrivers())

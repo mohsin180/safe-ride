@@ -17,23 +17,34 @@ import java.util.Map;
 import java.util.UUID;
 
 /**
- * Owns all fare/pricing math for rides. Keeping it in one place means the
- * pricing rules live in a single spot instead of being scattered across
- * RideService. All the constants (base fare, per-km/per-min rates, shared
- * discount, premium multiplier, min fare, currency) are externalized into
- * {@link PricingProperties} so they're config-driven.
+ * All fare maths, in two sentences:
  *
- * <p>The fare model is server-authoritative, road-distance + time based,
- * rideType-aware: it prefers the road distance/duration persisted on the ride
- * (from the routing API at creation time) and only falls back to a Haversine
- * straight-line estimate for legacy rides that have neither stored.
+ * <ol>
+ *   <li><b>The trip costs</b> {@code baseFare + perKm × km} (times the PREMIUM
+ *       multiplier for premium rides, never below {@code minFare}). That is the
+ *       whole amount, and it is what the driver collects.</li>
+ *   <li><b>Riders split it by distance travelled:</b> each pays the trip fare
+ *       times their own km × seats, over everyone's km × seats. Ride 4 km of a
+ *       16 km trip and you pay a quarter of what the person going the whole way
+ *       pays.</li>
+ * </ol>
+ *
+ * <p>The shares always add up to exactly the trip fare, so the driver is paid
+ * in full and no rider is charged for anyone else's distance.
+ *
+ * <p>Time is deliberately not priced. Duration is still shown on the ride
+ * cards, but two riders sitting in the same traffic shouldn't owe more than
+ * the same two on an empty road, and a rider has no way to predict it when
+ * they agree to a fare.
+ *
+ * <p>Gone, on purpose: the host fare cap, the redistribution of its excess,
+ * the per-extra-seat surcharge, and the "assume one more passenger joins"
+ * estimate. Each existed to patch a case the weighted model got wrong; a
+ * straight distance split has no such cases, and every screen can now show a
+ * number the user can reproduce on paper.
  */
 @Service
 public class PriceService {
-
-    /** Average city speed used to estimate trip duration from distance when no
-     *  routed duration is stored (km / 30 km/h * 60 = minutes). */
-    private static final double FALLBACK_SPEED_KMPH = 30.0;
 
     private final PricingProperties props;
     private final RideParticipantsRepository rideParticipantsRepository;
@@ -47,84 +58,63 @@ public class PriceService {
         this.joinRequestRepository = joinRequestRepository;
     }
 
-    // ─── Dynamic weighted pricing ───────────────────────────────────────
-    //
-    // Each rider's share of the trip gross is weighted by (own-leg km ×
-    // seats): whoever travels farther / books more seats pays more. The HOST
-    // is capped at their SOLO fare (the fare of their original leg alone) —
-    // co-passengers joining can only ever LOWER the host's cost, never raise
-    // it; any detour cost above the cap shifts to the detour-causing riders.
-    // The shares always sum exactly to the gross, so the driver is paid in
-    // full for the route actually driven.
+    // ── What the trip costs ─────────────────────────────────────────────
 
-    /** Gross fare for raw metrics — same formula as the ride gross. */
-    public double grossFromMetrics(double km, double min, RideType type) {
+    /** The fare for a route of {@code km}, before it is split. */
+    public double fareForKm(double km, RideType type) {
         double multiplier =
                 type == RideType.PREMIUM ? props.getPremiumMultiplier() : 1.0;
-        double raw = (props.getBaseFare() + km * props.getPerKm()
-                + min * props.getPerMin()) * multiplier;
-        return Math.max(props.getMinFare(), raw);
-    }
-
-    /** The host's solo fare — what their original leg costs alone. */
-    public double soloHostGross(Ride ride) {
-        double km = hostLegKm(ride);
-        double min = ride.getHostLegMin() != null
-                ? ride.getHostLegMin()
-                : (km / FALLBACK_SPEED_KMPH) * 60.0;
-        return round2(grossFromMetrics(km, min, ride.getRideType()));
-    }
-
-    private double hostLegKm(Ride ride) {
-        if (ride.getHostLegKm() != null) {
-            return ride.getHostLegKm();
-        }
-        if (ride.getPickup() == null || ride.getDestination() == null) {
-            return 1.0;
-        }
-        return distanceKm(
-                ride.getPickup().getLatitude(), ride.getPickup().getLongitude(),
-                ride.getDestination().getLatitude(),
-                ride.getDestination().getLongitude());
+        return round2(Math.max(props.getMinFare(),
+                (props.getBaseFare() + km * props.getPerKm()) * multiplier));
     }
 
     /**
-     * Weighted per-rider shares of the CURRENT gross (host + every joined
-     * co-passenger), keyed by userId. Weight = own-leg km × seats; host
-     * capped at their solo fare with the excess redistributed over the
-     * co-passengers by weight. Shares sum exactly to the (rounded) gross.
+     * The trip total — the driver's take, and the sum of every rider's share.
+     * 0.0 if the ride has no route to measure.
+     */
+    public double tripFare(Ride ride) {
+        if (ride.getPickup() == null || ride.getDestination() == null) {
+            return 0.0;
+        }
+        return fareForKm(tripKm(ride), ride.getRideType());
+    }
+
+    // ── How it splits ───────────────────────────────────────────────────
+
+    /**
+     * Each rider's share of the current trip fare, keyed by userId: the host
+     * plus every joined co-passenger, weighted by their own km × seats.
      */
     public Map<UUID, Double> computeShares(Ride ride) {
-        return sharesFor(ride, round2(gross(ride)), null, 0, 0);
+        return split(ride, tripFare(ride), null, 0, 0);
     }
 
     /**
-     * Would-be shares if a candidate rider (own leg {@code candidateLegKm},
-     * {@code candidateSeats}) joined, given the simulated {@code newGross}.
-     * Map contains the current riders plus the candidate under
-     * {@code candidateKey} — powers both fare previews.
+     * The shares if a candidate rider joined with their own leg of
+     * {@code candidateKm} and {@code candidateSeats}, given the trip fare the
+     * ride would then have. Contains the current riders plus the candidate
+     * under {@code candidateKey}. Powers the join preview.
      */
     public Map<UUID, Double> previewShares(Ride ride, UUID candidateKey,
-                                           double candidateLegKm, int candidateSeats,
-                                           double newGross) {
-        return sharesFor(ride, round2(newGross), candidateKey,
-                candidateLegKm, candidateSeats);
+                                           double candidateKm, int candidateSeats,
+                                           double newTripFare) {
+        return split(ride, round2(newTripFare), candidateKey,
+                candidateKm, candidateSeats);
     }
 
-    private Map<UUID, Double> sharesFor(Ride ride, double gross, UUID candidateKey,
-                                        double candidateLegKm, int candidateSeats) {
+    /**
+     * Distributes {@code total} across the riders by km × seats.
+     *
+     * <p>Every distance here is measured the same way — {@link #riderKm} for
+     * everyone. Mixing road distance for the host with straight-line distance
+     * for joiners, as this used to, quietly under-charged every co-passenger.
+     */
+    private Map<UUID, Double> split(Ride ride, double total, UUID candidateKey,
+                                    double candidateKm, int candidateSeats) {
         UUID hostId = ride.getCreatedByUserId();
 
-        // Weights: host first, then each participant by their own leg.
         Map<UUID, Double> weights = new LinkedHashMap<>();
-        double hostLeg = Math.max(0.1, hostLegKm(ride));
-        int hostSeats = Math.max(1, ride.getHostSeats());
-        weights.put(hostId, hostLeg * hostSeats);
-
-        // Seats each rider occupies, kept alongside the weights so the
-        // extra-seat surcharge can be applied per rider at the end.
-        Map<UUID, Integer> seatsByRider = new LinkedHashMap<>();
-        seatsByRider.put(hostId, hostSeats);
+        weights.put(hostId, Math.max(0.1, hostLegKm(ride)) * Math.max(1, ride.getHostSeats()));
 
         Map<UUID, JoinRequest> accepted = new HashMap<>();
         for (JoinRequest jr : joinRequestRepository
@@ -133,120 +123,104 @@ public class PriceService {
         }
         for (RideParticipants p : rideParticipantsRepository.findByRide_Id(ride.getId())) {
             if (p.getUserId().equals(hostId)) continue;
-            JoinRequest jr = accepted.get(p.getUserId());
-            double leg = hostLeg; // neutral fallback when no coords
-            if (jr != null && jr.getPickupLat() != null && jr.getPickupLng() != null
-                    && jr.getDropLat() != null && jr.getDropLng() != null) {
-                leg = Math.max(0.1, distanceKm(jr.getPickupLat(), jr.getPickupLng(),
-                        jr.getDropLat(), jr.getDropLng()));
-            }
             int seats = p.getSeats() > 0 ? p.getSeats() : 1;
-            weights.put(p.getUserId(), leg * seats);
-            seatsByRider.put(p.getUserId(), seats);
+            weights.put(p.getUserId(), riderKm(ride, accepted.get(p.getUserId())) * seats);
         }
         if (candidateKey != null) {
-            int seats = Math.max(1, candidateSeats);
-            weights.put(candidateKey, Math.max(0.1, candidateLegKm) * seats);
-            seatsByRider.put(candidateKey, seats);
+            weights.put(candidateKey,
+                    Math.max(0.1, candidateKm) * Math.max(1, candidateSeats));
         }
 
-        double totalW = weights.values().stream().mapToDouble(Double::doubleValue).sum();
+        double totalWeight = weights.values().stream()
+                .mapToDouble(Double::doubleValue).sum();
+
         Map<UUID, Double> shares = new LinkedHashMap<>();
+        double running = 0;
+        UUID last = null;
         for (Map.Entry<UUID, Double> e : weights.entrySet()) {
-            shares.put(e.getKey(), gross * e.getValue() / totalW);
+            double share = round2(total * e.getValue() / totalWeight);
+            shares.put(e.getKey(), share);
+            running += share;
+            last = e.getKey();
         }
-
-        // Extra-seat surcharge first, so what follows works on the amounts
-        // riders are actually charged. Driving the trip costs the same whether
-        // a rider takes one seat or three, but held seats stop anyone else
-        // joining — so the ride's total lands ABOVE the gross, which is why
-        // tripFare() sums these shares instead of returning the gross.
-        applySeatSurcharge(shares, seatsByRider);
-
-        // The whole ride's take, surcharges included — what the split must add
-        // up to once rounded.
-        double target = round2(shares.values().stream()
-                .mapToDouble(Double::doubleValue).sum());
-
-        // Host cap: co-passengers joining can only ever lower the host's cost,
-        // never raise it. The cap is the host's SOLO charge including their own
-        // seat surcharge — comparing against the bare solo gross (as this did
-        // before the surcharge existed) let a 3-seat host be billed 30% over
-        // the very ceiling meant to protect them. Any excess flows to the
-        // co-passengers whose detours caused it, proportionally by weight.
-        if (shares.size() > 1) {
-            double cap = round2(soloHostGross(ride)
-                    * seatSurchargeFactor(seatsByRider.getOrDefault(hostId, 1)));
-            double hostShare = shares.get(hostId);
-            if (hostShare > cap) {
-                double excess = hostShare - cap;
-                shares.put(hostId, cap);
-                double othersW = totalW - weights.get(hostId);
-                for (Map.Entry<UUID, Double> e : weights.entrySet()) {
-                    if (e.getKey().equals(hostId)) continue;
-                    shares.merge(e.getKey(), excess * e.getValue() / othersW, Double::sum);
-                }
-            }
+        // Rounding leaves a paisa or two unaccounted for; put it on the last
+        // rider so the shares sum to the trip fare exactly and the driver is
+        // never short-changed.
+        if (last != null) {
+            shares.merge(last, round2(total - running), Double::sum);
+            shares.put(last, round2(shares.get(last)));
         }
-
-        // Round to 2dp and pin the drift on the largest NON-host share where
-        // there is one, so the sum is exact without nudging the host back over
-        // their cap by a paisa.
-        UUID drift = hostId;
-        double largestV = -1;
-        double sum = 0;
-        for (Map.Entry<UUID, Double> e : shares.entrySet()) {
-            double r = round2(e.getValue());
-            shares.put(e.getKey(), r);
-            sum += r;
-            boolean preferable = shares.size() == 1 || !e.getKey().equals(hostId);
-            if (preferable && r > largestV) {
-                largestV = r;
-                drift = e.getKey();
-            }
-        }
-        shares.merge(drift, round2(target - sum), Double::sum);
-        shares.put(drift, round2(shares.get(drift)));
         return shares;
     }
 
-    /** Multiplier a rider's share carries for the extra seats they hold. */
-    private double seatSurchargeFactor(int seats) {
-        return 1 + props.getSeatSurchargeRate() * Math.max(0, seats - 1);
-    }
-
-    private void applySeatSurcharge(Map<UUID, Double> shares, Map<UUID, Integer> seatsByRider) {
-        double rate = props.getSeatSurchargeRate();
-        if (rate <= 0) {
-            return;
+    /** A joined rider's own distance — their pickup to their drop. */
+    private double riderKm(Ride ride, JoinRequest jr) {
+        if (jr != null && jr.getPickupLat() != null && jr.getPickupLng() != null
+                && jr.getDropLat() != null && jr.getDropLng() != null) {
+            return Math.max(0.1, distanceKm(jr.getPickupLat(), jr.getPickupLng(),
+                    jr.getDropLat(), jr.getDropLng()));
         }
-        for (Map.Entry<UUID, Double> e : shares.entrySet()) {
-            int extraSeats = Math.max(0, seatsByRider.getOrDefault(e.getKey(), 1) - 1);
-            if (extraSeats > 0) {
-                // Same shape as seatSurchargeFactor, kept inline so the map
-                // entry can be replaced in one pass.
-                shares.put(e.getKey(), round2(e.getValue() * (1 + rate * extraSeats)));
-            }
-        }
+        // No coordinates recorded — treat them as riding the host's leg, which
+        // is the trip they signed up for.
+        return Math.max(0.1, hostLegKm(ride));
     }
 
     /**
-     * ROUGH entry estimate for a browsing rider with an unknown route: the
-     * gross split over one-more-head. The feed uses the accurate weighted
-     * preview when the searcher's route is known; this is only the fallback.
-     * Returns null if the ride has no pickup/destination to measure.
+     * The host's own distance: their pickup to their destination, measured the
+     * same way as every co-passenger's leg.
+     *
+     * <p>Deliberately NOT the stored road distance, even though the ride has
+     * one. These numbers are only ever compared with each other to work out
+     * shares, and mixing units breaks that comparison: the host's road km were
+     * being weighed against joiners' straight-line km, so two people making the
+     * identical journey were billed 168 and 134 for it. Straight-line for
+     * everyone keeps the ratios honest — and keeps previews instant, since
+     * routing every rider's leg would mean an API call each.
+     *
+     * <p>The trip TOTAL still uses the real road distance. Only the split is
+     * proportional.
+     */
+    private double hostLegKm(Ride ride) {
+        if (ride.getPickup() == null || ride.getDestination() == null) {
+            return 1.0;
+        }
+        return distanceKm(
+                ride.getPickup().getLatitude(), ride.getPickup().getLongitude(),
+                ride.getDestination().getLatitude(), ride.getDestination().getLongitude());
+    }
+
+    // ── What each screen shows ──────────────────────────────────────────
+
+    /**
+     * What a rider browsing the feed would pay if they joined for the same
+     * route the host is driving. Honest and reproducible without knowing where
+     * they're actually going; the feed uses the exact preview instead whenever
+     * the searcher's own route is known.
+     *
+     * <p>Replaces an estimate that divided by the rider count <em>plus one</em>
+     * — a discount for a passenger who hadn't joined, which is why a host
+     * riding alone was quoted half of what they actually owed.
+     *
+     * @return null if the ride has no route to measure
      */
     public Double estimateRiderFare(Ride ride) {
         if (ride.getPickup() == null || ride.getDestination() == null) {
             return null;
         }
-        return round2(gross(ride) / (riderCount(ride) + 1));
+        double km = hostLegKm(ride);
+        return previewShares(ride, PREVIEW_CANDIDATE, km, 1,
+                fareForKm(tripKm(ride), ride.getRideType()))
+                .getOrDefault(PREVIEW_CANDIDATE, 0.0);
     }
 
+    /** Key for a hypothetical rider inside a preview split. */
+    private static final UUID PREVIEW_CANDIDATE = new UUID(0L, 0L);
+
     /**
-     * Fare breakdown for the ride-details screen, personalised to the viewer:
-     * {@code perRider} is the VIEWER's own weighted share when they're on the
-     * ride, else the average share. {@code baseFare} stays the full gross.
+     * The fare breakdown for the ride-details screen, from the viewer's point
+     * of view: {@code perRider} is their own share when they're on the ride,
+     * otherwise what they'd pay to join for the whole route. {@code baseFare}
+     * is the trip total.
      */
     public RideDetailsResponse.FareDto computeFare(Ride ride, UUID viewerId) {
         if (ride.getPickup() == null || ride.getDestination() == null) {
@@ -257,74 +231,25 @@ public class PriceService {
                     .currency(props.getCurrency())
                     .build();
         }
-        double gross = round2(gross(ride));
+        double total = tripFare(ride);
         Map<UUID, Double> shares = computeShares(ride);
-        double perRider = viewerId != null && shares.containsKey(viewerId)
+        Double perRider = viewerId != null && shares.containsKey(viewerId)
                 ? shares.get(viewerId)
-                : round2(gross / Math.max(1, shares.size()));
+                : estimateRiderFare(ride);
         return RideDetailsResponse.FareDto.builder()
-                .baseFare(gross)          // full trip cost (driver's take)
+                .baseFare(total)               // the whole trip — the driver's take
                 .sharedDiscount(0.0)
-                .perRider(perRider)       // the viewer's own weighted share
+                .perRider(perRider == null ? 0.0 : perRider)
                 .currency(props.getCurrency())
                 .build();
     }
 
-    /** Legacy entry point — average share (no viewer context). */
+    /** Legacy entry point — no viewer context. */
     public RideDetailsResponse.FareDto computeFare(Ride ride) {
         return computeFare(ride, null);
     }
 
-    /**
-     * The trip total the driver collects — the full gross (all riders' shares
-     * combined). Used by driver ride-history fares and earnings. 0.0 if the
-     * ride has no route to measure.
-     */
-    public double tripFare(Ride ride) {
-        if (ride.getPickup() == null || ride.getDestination() == null) {
-            return 0.0;
-        }
-        // Sum of the shares, not the bare gross: extra-seat surcharges are
-        // real money the riders hand over, so the driver's earnings have to
-        // include them.
-        return round2(computeShares(ride).values().stream()
-                .mapToDouble(Double::doubleValue).sum());
-    }
-
-    /** Number of riders splitting the fare: the host plus every joined
-     *  co-passenger. Always at least 1. */
-    private int riderCount(Ride ride) {
-        int coPassengers =
-                rideParticipantsRepository.findUserIdsByRideId(ride.getId()).size();
-        return 1 + coPassengers;
-    }
-
-    /**
-     * Each rider's share: the gross split evenly across the actual riders (no
-     * discount). The single source of truth for both the feed estimate and the
-     * details breakdown so they can never diverge.
-     */
-    private double perRiderFare(Ride ride) {
-        return round2(gross(ride) / Math.max(1, riderCount(ride)));
-    }
-
-    /**
-     * Gross trip fare:
-     * {@code max(minFare, (baseFare + km*perKm + min*perMin) * premiumMultiplier)}
-     * where the multiplier is {@code premiumMultiplier} for PREMIUM rides else 1.0.
-     * Distance/duration come from the ride's persisted route values, falling
-     * back to Haversine + a 30 km/h duration estimate for legacy rides.
-     */
-    private double gross(Ride ride) {
-        double km = tripKm(ride);
-        double min = tripMinutes(ride);
-        double multiplier = ride.getRideType() == RideType.PREMIUM
-                ? props.getPremiumMultiplier()
-                : 1.0;
-        double raw = (props.getBaseFare() + km * props.getPerKm() + min * props.getPerMin())
-                * multiplier;
-        return Math.max(props.getMinFare(), raw);
-    }
+    // ── Distance ────────────────────────────────────────────────────────
 
     /** Road distance in km: the persisted route distance, else Haversine. */
     private double tripKm(Ride ride) {
@@ -332,19 +257,8 @@ public class PriceService {
             return ride.getRouteDistanceKm();
         }
         return distanceKm(
-                ride.getPickup().getLatitude(),
-                ride.getPickup().getLongitude(),
-                ride.getDestination().getLatitude(),
-                ride.getDestination().getLongitude());
-    }
-
-    /** Trip duration in minutes: the persisted route duration, else a
-     *  distance/30 km/h estimate (legacy rides). */
-    private double tripMinutes(Ride ride) {
-        if (ride.getRouteDurationMin() != null) {
-            return ride.getRouteDurationMin();
-        }
-        return (tripKm(ride) / FALLBACK_SPEED_KMPH) * 60.0;
+                ride.getPickup().getLatitude(), ride.getPickup().getLongitude(),
+                ride.getDestination().getLatitude(), ride.getDestination().getLongitude());
     }
 
     /**

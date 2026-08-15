@@ -37,10 +37,6 @@ public record CreateRideRequest(
         int seats,
 
         @NotNull(message = "is required (ECONOMY or PREMIUM)")
-        RideType rideType,
-
-        /** Optional scheduled departure (ISO-8601 instant). Null / past = leave
-         *  now (on-demand); a future time schedules the ride. */
-        Instant departureTime
+        RideType rideType
 ) {
 }

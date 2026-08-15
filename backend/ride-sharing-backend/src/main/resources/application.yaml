@@ -75,11 +75,10 @@ app:
 # Fare-pricing model (server-authoritative), from rides-service.
 pricing:
   base-fare: ${PRICE_BASE_FARE:50}
+  # Distance is the only thing that varies the fare. Trip duration is shown on
+  # the ride cards but never priced — riders can't predict traffic when they
+  # agree to a fare, and two people in the same jam shouldn't owe more.
   per-km: ${PRICE_PER_KM:20}
-  per-min: ${PRICE_PER_MIN:2}
-  # Extra seats a rider holds cost 15% of their share each: the trip costs the
-  # same to drive, but blocked seats stop anyone else joining.
-  seat-surcharge-rate: ${PRICE_SEAT_SURCHARGE:0.15}
   premium-multiplier: ${PRICE_PREMIUM_MULTIPLIER:1.5}
   min-fare: ${PRICE_MIN_FARE:80}
   currency: ${PRICE_CURRENCY:PKR}

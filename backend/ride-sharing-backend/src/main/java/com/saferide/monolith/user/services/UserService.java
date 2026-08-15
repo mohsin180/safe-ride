@@ -4,12 +4,12 @@ import com.saferide.monolith.user.exceptions.InvalidOnboardingTokenException;
 import com.saferide.monolith.user.exceptions.UserAlreadyExistException;
 import com.saferide.monolith.user.exceptions.GenderLockedException;
 import com.saferide.monolith.user.exceptions.UserNotFoundException;
-import io.jsonwebtoken.JwtException;
-import com.saferide.monolith.user.model.UserMapper;
+import com.saferide.monolith.user.model.PendingSignup;
 import com.saferide.monolith.user.model.Users;
 import com.saferide.monolith.user.model.dtos.*;
 import com.saferide.monolith.common.security.UserContext;
 import com.saferide.monolith.kyc.service.KycGuard;
+import com.saferide.monolith.user.repos.PendingSignupRepository;
 import com.saferide.monolith.user.repos.UserRepository;
 import com.saferide.monolith.user.security.AttemptLimiter;
 import com.saferide.monolith.user.security.JwtUtil;
@@ -19,32 +19,36 @@ import org.springframework.security.authentication.BadCredentialsException;
 import org.springframework.security.authentication.UsernamePasswordAuthenticationToken;
 import org.springframework.security.core.Authentication;
 import org.springframework.security.core.context.SecurityContextHolder;
-import org.springframework.security.core.userdetails.UsernameNotFoundException;
 import org.springframework.security.crypto.password.PasswordEncoder;
 import org.springframework.stereotype.Service;
 import jakarta.transaction.Transactional;
 
+import java.util.Optional;
 import java.util.UUID;
 
 @Service
 public class UserService {
     private final UserRepository userRepository;
-    private final UserMapper userMapper;
+    private final PendingSignupRepository pendingSignupRepository;
+    private final OnboardingService onboardingService;
     private final AuthenticationManager authenticationManager;
     private final JwtUtil jwtUtil;
     private final PasswordEncoder passwordEncoder;
-    private final EmailVerificationService verificationService;
     private final AttemptLimiter attemptLimiter;
     private final KycGuard kycGuard;
 
-    public UserService(UserRepository userRepository, UserMapper userMapper, AuthenticationManager authenticationManager, JwtUtil jwtUtil, PasswordEncoder passwordEncoder, EmailVerificationService verificationService,
+    public UserService(UserRepository userRepository,
+                       PendingSignupRepository pendingSignupRepository,
+                       OnboardingService onboardingService,
+                       AuthenticationManager authenticationManager, JwtUtil jwtUtil,
+                       PasswordEncoder passwordEncoder,
                        AttemptLimiter attemptLimiter, KycGuard kycGuard) {
         this.userRepository = userRepository;
-        this.userMapper = userMapper;
+        this.pendingSignupRepository = pendingSignupRepository;
+        this.onboardingService = onboardingService;
         this.authenticationManager = authenticationManager;
         this.jwtUtil = jwtUtil;
         this.passwordEncoder = passwordEncoder;
-        this.verificationService = verificationService;
         this.attemptLimiter = attemptLimiter;
         this.kycGuard = kycGuard;
     }
@@ -86,26 +90,39 @@ public class UserService {
         return (UserContext) authentication.getDetails();
     }
 
-    public UserResponse register(RegisterRequest request) {
-        if (userRepository.existsByEmail(request.email())) {
-            throw new UserAlreadyExistException("User already exists");
-        }
-
-        Users user = userMapper.toUser(request);
-        user.setPassword(passwordEncoder.encode(request.password()));
-        userRepository.save(user);
-        verificationService.createAndSendVerification(user);
-        UserResponse mapped = userMapper.toResponse(user);
-        // The client persists this so it can still finish onboarding after the
-        // app is killed while the user is away verifying their email.
-        return new UserResponse(mapped.id(), mapped.email(),
-                jwtUtil.generateOnboardingToken(user.getId()));
-    }
-
+    /**
+     * Signs in.
+     *
+     * <p>Two populations can answer to an address: a finished account in
+     * {@code users}, and a signup still in flight in {@code pending_signup}.
+     * The second is checked first and never authenticates through Spring
+     * Security — that {@code UserDetailsService} only knows real accounts, and
+     * a pending signup isn't one yet. Matching the password by hand here is
+     * what lets someone who reinstalled the app resume onboarding with nothing
+     * but their credentials.
+     */
     public LoginResponse login(LoginRequest request) throws BadRequestException {
-        // Bounded before the password is ever hashed, so a brute-force run
+        // Bounded before any password is ever hashed, so a brute-force run
         // can't spend the CPU either.
         attemptLimiter.check("sign in", request.email());
+
+        Optional<PendingSignup> pending = pendingSignupRepository.findByEmail(request.email());
+        if (pending.isPresent()) {
+            PendingSignup signup = pending.get();
+            if (!passwordEncoder.matches(request.password(), signup.getPassword())) {
+                throw new BadCredentialsException("Invalid email or password");
+            }
+            attemptLimiter.reset(request.email());
+            // No token: there is no account to hold a session yet. The stage
+            // tells the app which onboarding screen to reopen.
+            OnboardingStateResponse state = onboardingService.stateFor(signup);
+            return LoginResponse.builder()
+                    .userId(signup.getId())
+                    .onboardingStage(state.stage())
+                    .onboardingToken(state.onboardingToken())
+                    .build();
+        }
+
         try {
             authenticationManager.authenticate(
                     new UsernamePasswordAuthenticationToken(
@@ -120,20 +137,6 @@ public class UserService {
         if (!users.isEnabled()) {
             throw new UserNotFoundException("Account is disabled");
         }
-        if (!users.isEmailVerified()) {
-            throw new UserNotFoundException("Please verify your email before logging in");
-        }
-        if (users.getRole() == null) {
-            // Not an error: the credentials were right, onboarding just isn't
-            // finished. Handing back the id and an onboarding token is the only
-            // way a user whose app died mid-signup can ever pick a role — the
-            // id is otherwise only returned by /register, which won't repeat.
-            return LoginResponse.builder()
-                    .userId(users.getId())
-                    .roleRequired(true)
-                    .onboardingToken(jwtUtil.generateOnboardingToken(users.getId()))
-                    .build();
-        }
 
         String token = jwtUtil.generateToken(
                 users.getId(), users.getRole().name(), users.getGender().name(), users.getEmail());
@@ -143,57 +146,23 @@ public class UserService {
         attemptLimiter.reset(request.email());
         return LoginResponse.builder()
                 .token(token)
+                .onboardingStage(OnboardingStage.COMPLETE)
                 .build();
     }
 
     /**
-     * Sets the caller's role and issues their first real token. The user is
-     * taken from the signed onboarding token rather than a path parameter —
-     * the old {@code /{id}/select-role} was public and trusted the id as-is,
-     * so anyone holding a stranger's UUID could set their role.
+     * Whether the signup behind this id has clicked its verification link.
+     * Polled by the app while the user is away in their mail client.
+     *
+     * <p>Answers about {@code pending_signup}, not {@code users}: a row in
+     * {@code users} is only ever created after verification, so asking there
+     * could only ever return true and would tell the caller nothing.
      */
-    public LoginResponse selectRole(String onboardingToken, RoleSelection request) {
-        UUID userId;
-        try {
-            userId = jwtUtil.parseOnboardingToken(onboardingToken);
-        } catch (JwtException | IllegalArgumentException e) {
-            throw new InvalidOnboardingTokenException(
-                    "Your signup session expired. Please log in to continue.");
-        }
-        Users users = userRepository.findById(userId).orElseThrow(
-                () -> new UsernameNotFoundException("User NotFound")
-        );
-        // The same gates login enforces. Without them, /register followed by
-        // /select-role minted a full access token for an address the caller
-        // never proved they own — "verified email" meant nothing.
-        if (!users.isEnabled()) {
-            throw new UserNotFoundException("Account is disabled");
-        }
-        if (!users.isEmailVerified()) {
-            throw new UserNotFoundException("Please verify your email before choosing a role");
-        }
-        // The onboarding token stays valid for 24h; without this it could be
-        // replayed afterwards to flip a settled account's role.
-        if (users.getRole() != null) {
-            throw new UserAlreadyExistException("A role has already been chosen for this account");
-        }
-        users.setRole(Role.valueOf(request.role()));
-        Users updatedUser = userRepository.save(users);
-        String token = jwtUtil.generateToken(
-                updatedUser.getId(),
-                updatedUser.getRole().name(),
-                updatedUser.getGender().name(),
-                updatedUser.getEmail()
-        );
-        return LoginResponse.builder()
-                .token(token)
-                .build();
-    }
-
     public boolean isEmailVerified(String id) {
-        Users users = userRepository.findById(UUID.fromString(id)).orElseThrow(
-                () -> new UserNotFoundException("user not found")
-        );
-        return users.isEmailVerified();
+        return pendingSignupRepository.findById(UUID.fromString(id))
+                .map(PendingSignup::isEmailVerified)
+                // No pending row and a well-formed id means the signup already
+                // finished and was promoted — verified by construction.
+                .orElseGet(() -> userRepository.existsById(UUID.fromString(id)));
     }
 }
