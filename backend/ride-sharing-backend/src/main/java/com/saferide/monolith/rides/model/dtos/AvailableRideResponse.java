@@ -46,6 +46,21 @@ public class AvailableRideResponse {
     private Double pickupLng;
     private Double dropLat;
     private Double dropLng;
+    /**
+     * Driver feed only: the stop this driver would reach FIRST, and the one
+     * they'd finish at, for the shared route ordered from where the driver is
+     * standing right now. The plain {@code pickup}/{@code drop} above are
+     * always the HOST's two points, which on a ride with co-passengers is
+     * neither where the driver starts nor where they end. Null on the
+     * passenger feed and whenever the driver's location is unknown — callers
+     * fall back to {@code pickup}/{@code drop}.
+     */
+    private String firstPickup;
+    private Double firstPickupLat;
+    private Double firstPickupLng;
+    private String lastDrop;
+    private Double lastDropLat;
+    private Double lastDropLng;
     private Integer seatsAvailable;
     /** Co-passengers who have actually joined (accepted) this ride — what the
      *  "Riders" stat shows. Distinct from seatsAvailable (remaining capacity). */

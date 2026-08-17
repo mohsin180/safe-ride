@@ -25,4 +25,12 @@ public interface JoinRequestRepository extends JpaRepository<JoinRequest, UUID> 
      *  accepted co-passenger's route so the map can draw the full multi-stop
      *  polyline (host pickup/drop + each rider's pickup/drop). */
     List<JoinRequest> findByRideIdAndStatus(UUID rideId, JoinRequestStatus status);
+
+    /**
+     * Accepted requests for a whole batch of rides in one query. The driver
+     * feed needs every rider's stops on every ride it lists; asking per ride
+     * turned one screen into one query per result.
+     */
+    List<JoinRequest> findByRideIdInAndStatus(java.util.Collection<UUID> rideIds,
+                                              JoinRequestStatus status);
 }

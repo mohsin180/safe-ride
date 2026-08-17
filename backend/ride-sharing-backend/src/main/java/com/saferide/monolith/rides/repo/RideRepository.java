@@ -75,6 +75,7 @@ public interface RideRepository extends JpaRepository<Ride, UUID> {
             "AND r.createdByUserId <> :currentUserId " +
             "AND r.gender = :gender " +
             "AND r.availableSeats > 0 " +
+            "AND r.publishedToDrivers = false " +
             "AND r.id NOT IN (SELECT p.ride.id FROM RideParticipants p WHERE p.userId = :currentUserId) " +
             "ORDER BY r.createdAt DESC")
     List<Ride> findAvailableRides(@Param("currentUserId") UUID currentUserId,
@@ -92,6 +93,7 @@ public interface RideRepository extends JpaRepository<Ride, UUID> {
             + "AND r.created_by_user_id <> :uid "
             + "AND r.gender = :gender "
             + "AND r.available_seats > 0 "
+            + "AND r.published_to_drivers = false "
             + "AND r.id NOT IN (SELECT p.ride_id FROM ride_participants p WHERE p.user_id = :uid) "
             + "AND r.pickup_lat IS NOT NULL AND r.pickup_long IS NOT NULL "
             + "AND " + PICKUP_DISTANCE_METERS + " <= :radiusMeters "

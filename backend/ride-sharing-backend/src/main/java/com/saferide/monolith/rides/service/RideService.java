@@ -254,6 +254,22 @@ public class RideService {
         }
         ride.setPublishedToDrivers(true);
         Ride saved = rideRepository.save(ride);
+
+        // Publishing closes the group, so anyone still waiting on an answer
+        // would wait for ever: the join guard above now refuses their request
+        // and nothing else would ever resolve it. Worse, a pending request
+        // counts towards "one ride at a time", so it would quietly block them
+        // from booking anything else. Decline them and say so.
+        List<JoinRequest> stillWaiting = joinRequestRepository
+                .findByRideIdAndStatus(rideId, JoinRequestStatus.PENDING);
+        for (JoinRequest jr : stillWaiting) {
+            jr.setStatus(JoinRequestStatus.DECLINED);
+            joinRequestRepository.save(jr);
+            notificationPublisher.publish(
+                    RideNotificationEvent.JOIN_DECLINED, ride,
+                    List.of(jr.getRequesterId()));
+        }
+
         return rideMapper.toResponse(saved);
     }
 
@@ -615,6 +631,13 @@ public class RideService {
             throw new ConflictException(
                     "Ride is " + ride.getStatus() + " and can no longer be joined");
         }
+        // Published means the host has closed the group and is now waiting on a
+        // driver. Letting someone in after that would re-stamp the route and
+        // move everyone's share while drivers are already quoting on it.
+        if (ride.isPublishedToDrivers()) {
+            throw new ConflictException(
+                    "This ride is already waiting for a driver and can no longer be joined");
+        }
         // Gender-specific matching, enforced server-side: the feed hides
         // opposite-gender rides, but a client could still POST a join with
         // any rideId, so reject a mismatch here too.
@@ -700,6 +723,10 @@ public class RideService {
         // written, so they rode for free and the re-priced route no longer
         // matched anyone's charged amount; accepting on a COMPLETED or
         // CANCELLED one rewrote finished history.
+        if (ride.isPublishedToDrivers()) {
+            throw new ConflictException(
+                    "This ride is already waiting for a driver — you can't add riders now");
+        }
         if (ride.getStatus() != RideStatus.PENDING) {
             throw new ConflictException(
                     "This ride is no longer open — it is " + ride.getStatus().name().toLowerCase());
@@ -885,8 +912,11 @@ public class RideService {
     }
 
     /** How far a ride's drop-off may be from the rider's own destination and
-     *  still count as "on the way" (km). */
-    private static final double DROP_MATCH_RADIUS_KM = 8.0;
+     *  still count as "on the way" (km). Widened from 8 km: two rides leaving
+     *  the same street for opposite ends of the city sit ~11 km apart at the
+     *  drop, so a rider searching from that street saw only one of them and
+     *  the feed looked broken. */
+    private static final double DROP_MATCH_RADIUS_KM = 10.0;
 
     public List<AvailableRideResponse> getAvailableRides(
             Double lat, Double lng, Double dropLat, Double dropLng, Integer seats) {
@@ -1061,10 +1091,106 @@ public class RideService {
         Map<UUID, PassengerSummary> hosts = fetchPassengerSummaries(
                 rides.stream().map(Ride::getCreatedByUserId).toList());
 
+        // Every rider's stops for the whole page in ONE query, so the ordering
+        // below doesn't turn each result into its own round-trip.
+        Map<UUID, List<JoinRequest>> stopsByRide = rides.isEmpty()
+                ? Map.of()
+                : joinRequestRepository
+                        .findByRideIdInAndStatus(
+                                rides.stream().map(Ride::getId).toList(),
+                                JoinRequestStatus.ACCEPTED)
+                        .stream()
+                        .collect(Collectors.groupingBy(JoinRequest::getRideId));
+
         // Preserve the DB's nearest-first order; attach distance/fare for display.
         return rides.stream()
-                .map(r -> toAvailableRideResponse(r, lat, lng, hosts))
+                .map(r -> {
+                    AvailableRideResponse resp = toAvailableRideResponse(r, lat, lng, hosts);
+                    applyDriverRouteEnds(resp, r,
+                            stopsByRide.getOrDefault(r.getId(), List.of()), lat, lng);
+                    return resp;
+                })
                 .toList();
+    }
+
+    /**
+     * Fills in where THIS driver would start and finish: the shared route
+     * ordered from wherever they are — nearest pickup first, everyone aboard
+     * before anyone is dropped, nearest drop next.
+     *
+     * <p>Display only. The route that prices the ride
+     * ({@link #restampFullRoute}) stays anchored at the host's pickup on
+     * purpose: anchoring it here would make one ride cost a different amount
+     * to every driver looking at it, and change as they drove.
+     *
+     * <p>Leaves the fields null when there's nothing useful to add — no
+     * driver location, or a ride nobody has joined, where the host's own two
+     * points already are the first pickup and the last drop.
+     */
+    private void applyDriverRouteEnds(AvailableRideResponse resp, Ride ride,
+                                      List<JoinRequest> riderStops,
+                                      Double lat, Double lng) {
+        if (lat == null || lng == null || riderStops.isEmpty()
+                || ride.getPickup() == null || ride.getDestination() == null) {
+            return;
+        }
+
+        List<Stop> pickups = new ArrayList<>();
+        List<Stop> drops = new ArrayList<>();
+        pickups.add(new Stop(addressOf(ride.getPickup()),
+                latOf(ride.getPickup()), lngOf(ride.getPickup())));
+        drops.add(new Stop(addressOf(ride.getDestination()),
+                latOf(ride.getDestination()), lngOf(ride.getDestination())));
+        for (JoinRequest jr : riderStops) {
+            if (jr.getPickupLat() != null && jr.getPickupLng() != null) {
+                pickups.add(new Stop(jr.getPickup(), jr.getPickupLat(), jr.getPickupLng()));
+            }
+            if (jr.getDropLat() != null && jr.getDropLng() != null) {
+                drops.add(new Stop(jr.getDrop(), jr.getDropLat(), jr.getDropLng()));
+            }
+        }
+
+        Stop first = nearestTo(lat, lng, pickups);
+        // Walk the pickups from the driver, then the drops from wherever the
+        // last pickup left us — the last stop of that walk is where the trip
+        // ends for this driver.
+        double[] cursor = {first.lat(), first.lng()};
+        List<Stop> remaining = new ArrayList<>(pickups);
+        remaining.remove(first);
+        while (!remaining.isEmpty()) {
+            Stop next = nearestTo(cursor[0], cursor[1], remaining);
+            remaining.remove(next);
+            cursor = new double[]{next.lat(), next.lng()};
+        }
+        List<Stop> remainingDrops = new ArrayList<>(drops);
+        Stop last = null;
+        while (!remainingDrops.isEmpty()) {
+            last = nearestTo(cursor[0], cursor[1], remainingDrops);
+            remainingDrops.remove(last);
+            cursor = new double[]{last.lat(), last.lng()};
+        }
+
+        resp.setFirstPickup(first.address());
+        resp.setFirstPickupLat(first.lat());
+        resp.setFirstPickupLng(first.lng());
+        if (last != null) {
+            resp.setLastDrop(last.address());
+            resp.setLastDropLat(last.lat());
+            resp.setLastDropLng(last.lng());
+        }
+    }
+
+    /** One stop on the shared route, with the address to show for it. */
+    private record Stop(String address, double lat, double lng) {}
+
+    private Stop nearestTo(double lat, double lng, List<Stop> pool) {
+        Stop best = pool.get(0);
+        double bestD = Double.MAX_VALUE;
+        for (Stop s : pool) {
+            double d = priceService.distanceKm(lat, lng, s.lat(), s.lng());
+            if (d < bestD) { bestD = d; best = s; }
+        }
+        return best;
     }
 
     /** The driver dismisses a ride from their feed — recorded so it stays
